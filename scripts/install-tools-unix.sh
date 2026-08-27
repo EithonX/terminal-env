@@ -44,21 +44,19 @@ install_system_packages(){
 
 install_github_tools(){
   [[ $PROFILE == minimal ]] && return 0
-  [[ $DRY_RUN == 1 ]] && { say "Would install pinned Oh My Posh, Atuin, fzf, zoxide and Deja releases"; return 0; }
+  [[ $DRY_RUN == 1 ]] && { say "Would install pinned Oh My Posh, Atuin, fzf and zoxide releases"; return 0; }
   local tmp; tmp=$(mktemp -d)
-  local omp_asset atuin_asset fzf_asset zoxide_asset deja_asset
+  local omp_asset atuin_asset fzf_asset zoxide_asset
   if [[ $OS == linux ]]; then
     omp_asset="posh-linux-$ARCH"
     [[ $ARCH == amd64 ]] && atuin_asset="atuin-x86_64-unknown-linux-gnu.tar.gz" || atuin_asset="atuin-aarch64-unknown-linux-gnu.tar.gz"
     fzf_asset="fzf-${FZF_VERSION}-linux_${ARCH}.tar.gz"
     [[ $ARCH == amd64 ]] && zoxide_asset="zoxide-${ZOXIDE_VERSION}-x86_64-unknown-linux-musl.tar.gz" || zoxide_asset="zoxide-${ZOXIDE_VERSION}-aarch64-unknown-linux-musl.tar.gz"
-    deja_asset="deja_${DEJA_VERSION}_linux_${ARCH}.tar.gz"
   else
     omp_asset="posh-darwin-$ARCH"
     [[ $ARCH == amd64 ]] && atuin_asset="atuin-x86_64-apple-darwin.tar.gz" || atuin_asset="atuin-aarch64-apple-darwin.tar.gz"
     fzf_asset="fzf-${FZF_VERSION}-darwin_${ARCH}.tar.gz"
     [[ $ARCH == amd64 ]] && zoxide_asset="zoxide-${ZOXIDE_VERSION}-x86_64-apple-darwin.tar.gz" || zoxide_asset="zoxide-${ZOXIDE_VERSION}-aarch64-apple-darwin.tar.gz"
-    deja_asset="deja_${DEJA_VERSION}_darwin_${ARCH}.tar.gz"
   fi
 
   download_release_asset JanDeDobbeleer/oh-my-posh "v$OH_MY_POSH_VERSION" "$omp_asset" "$tmp/omp"
@@ -69,8 +67,6 @@ install_github_tools(){
   install_archive_binary "$tmp/fzf.tar.gz" fzf "$LOCAL_BIN/fzf"
   download_release_asset ajeetdsouza/zoxide "v$ZOXIDE_VERSION" "$zoxide_asset" "$tmp/zoxide.tar.gz"
   install_archive_binary "$tmp/zoxide.tar.gz" zoxide "$LOCAL_BIN/zoxide"
-  download_release_asset Giammarco-Ferranti/deja "v$DEJA_VERSION" "$deja_asset" "$tmp/deja.tar.gz"
-  install_archive_binary "$tmp/deja.tar.gz" deja "$LOCAL_BIN/deja"
   rm -rf "$tmp"
 }
 

@@ -4,28 +4,81 @@ SOURCE="$HOME/.local/share/terminal-env/source"
 CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
 STATE="$HOME/.local/state/terminal-env"
 profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
-[[ -d "$SOURCE/.git" ]] || { echo 'No Git-backed source tree is installed; update from a fresh release/repository checkout.' >&2; exit 2; }
+check_only=0
+remote_override=''
+branch_override=''
+
+usage(){ cat <<'USAGE'
+Usage: terminal-update [--check] [--remote NAME] [--branch NAME]
+
+Updates Terminal Environment source/config from the installed Git repository.
+External dependency versions are not upgraded here; use terminal-deps separately.
+USAGE
+}
+while (($#)); do
+  case "$1" in
+    --check) check_only=1; shift ;;
+    --remote) remote_override=${2:?missing remote}; shift 2 ;;
+    --branch) branch_override=${2:?missing branch}; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+[[ -d "$SOURCE/.git" ]] || { echo 'No Git-backed source is installed. Reinstall once from your GitHub clone; future terminal-update runs will then use that remote.' >&2; exit 2; }
 [[ -z $(git -C "$SOURCE" status --porcelain) ]] || { echo 'Installed source has local changes; refusing to overwrite them.' >&2; exit 2; }
+
+current_branch=$(git -C "$SOURCE" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+upstream=$(git -C "$SOURCE" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+if [[ -n $remote_override ]]; then remote=$remote_override
+elif [[ -n $upstream ]]; then remote=${upstream%%/*}
+else remote=origin
+fi
+if [[ -n $branch_override ]]; then branch=$branch_override
+elif [[ -n $upstream ]]; then branch=${upstream#*/}
+elif [[ -n $current_branch ]]; then branch=$current_branch
+else { echo 'Cannot determine update branch; pass --branch.' >&2; exit 2; }
+fi
+
+git -C "$SOURCE" remote get-url "$remote" >/dev/null 2>&1 || { echo "Git remote '$remote' is not configured." >&2; exit 2; }
+git -C "$SOURCE" fetch --prune "$remote" "$branch"
 old=$(git -C "$SOURCE" rev-parse HEAD)
+latest=$(git -C "$SOURCE" rev-parse "$remote/$branch")
+if [[ $old == "$latest" ]]; then
+  echo "Already up to date: ${old:0:12} ($remote/$branch)"
+  exit 0
+fi
+if (( check_only )); then
+  count=$(git -C "$SOURCE" rev-list --count "$old..$latest" 2>/dev/null || echo '?')
+  echo "Update available: ${old:0:12} -> ${latest:0:12} ($count commit(s), $remote/$branch)"
+  exit 0
+fi
+
+old_versions=$(git -C "$SOURCE" rev-parse "$old:versions.env" 2>/dev/null || echo missing)
 rollback_update() {
   local rc=$?
   trap - ERR INT TERM
-  echo 'Update failed; restoring previous known-good revision and managed components.' >&2
+  echo 'Source update failed; restoring previous known-good revision/configuration.' >&2
   git -C "$SOURCE" reset --hard "$old" >/dev/null 2>&1 || true
-  PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh" >/dev/null 2>&1 || true
-  PROFILE="$profile" "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
   command -v chezmoi >/dev/null 2>&1 && chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
+  PROFILE="$profile" SYNC_PLUGINS=0 "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
   exit "$rc"
 }
 trap rollback_update ERR INT TERM
-git -C "$SOURCE" fetch --prune
-git -C "$SOURCE" pull --ff-only
+
+git -C "$SOURCE" merge --ff-only "$latest"
 "$SOURCE/tests/smoke.sh" --source-only
-PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh"
-PROFILE="$profile" "$SOURCE/scripts/build-zsh-plugins.sh"
 chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
-command -v deja >/dev/null 2>&1 && deja daemon --restart >/dev/null 2>&1 || true
+PROFILE="$profile" SYNC_PLUGINS=0 "$SOURCE/scripts/build-zsh-plugins.sh"
 terminal-doctor --quick
 printf '%s\n' "$old" > "$STATE/previous-commit"
+new_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
+if [[ $old_versions != "$new_versions" ]]; then
+  printf '%s\n' "$(git -C "$SOURCE" rev-parse HEAD)" > "$STATE/deps-pending"
+  echo 'Source updated successfully. Dependency manifest also changed.'
+  echo 'Run: terminal-deps sync'
+else
+  rm -f "$STATE/deps-pending"
+  echo "Source updated successfully. Previous revision: $old"
+fi
 trap - ERR INT TERM
-echo "Updated successfully. Previous revision: $old"

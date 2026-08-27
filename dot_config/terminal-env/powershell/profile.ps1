@@ -1,5 +1,5 @@
 # Managed Terminal Environment PowerShell profile. Optional integrations fail open.
-$env:TERMINAL_ENV_VERSION = '6'
+$env:TERMINAL_ENV_VERSION = '8'
 $localBin = Join-Path $HOME '.local\bin'
 if (-not ($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -eq $localBin })) { $env:PATH = "$localBin$([IO.Path]::PathSeparator)$env:PATH" }
 try { $utf8=[Text.UTF8Encoding]::new($false); [Console]::InputEncoding=$utf8; [Console]::OutputEncoding=$utf8; $global:OutputEncoding=$utf8 } catch {}
@@ -64,6 +64,7 @@ function terminal-doctor { & (Join-Path $HOME '.config\terminal-env\powershell\d
 function terminal-update { & (Join-Path $HOME '.config\terminal-env\powershell\update.ps1') @args }
 function terminal-rollback { & (Join-Path $HOME '.config\terminal-env\powershell\rollback.ps1') @args }
 function terminal-backup { & (Join-Path $HOME '.config\terminal-env\powershell\backup.ps1') @args }
+function terminal-deps { & (Join-Path $HOME '.config\terminal-env\powershell\deps.ps1') @args }
 $localProfile = Join-Path $HOME '.config\terminal-env\local.ps1'; if (Test-Path $localProfile) { . $localProfile }
 $ompTheme = Join-Path $HOME '.config\oh-my-posh\terminal.omp.json'
 if ((Get-Command oh-my-posh -ErrorAction SilentlyContinue) -and (Test-Path $ompTheme)) { try { (& oh-my-posh init pwsh --strict --config $ompTheme | Out-String) | Invoke-Expression } catch { function global:prompt { "PS $($executionContext.SessionState.Path.CurrentLocation)> " } } }

@@ -5,7 +5,7 @@ Terminal Environment is designed around failure isolation. The operating-system 
 ## Invariants
 
 1. Core commands keep their native semantics.
-2. Optional intelligence fails open: Deja, Atuin, fzf, Oh My Posh, and enhanced completions may disappear without preventing a usable shell.
+2. Optional intelligence fails open: zsh-autosuggestions, Atuin, fzf, Oh My Posh, and enhanced completions may disappear without preventing a usable shell.
 3. Native shell history remains available beneath enhanced history.
 4. Install and update actions create recoverable state before replacing managed files.
 5. Updates are explicit and Git-backed; shell startup never self-updates.
@@ -18,8 +18,9 @@ Terminal Environment is designed around failure isolation. The operating-system 
 - `install.sh` / `install.ps1`: provisioning, migration, backups, initial application.
 - `chezmoi`: deterministic target-state rendering.
 - `versions.env`: pinned portable dependency versions and plugin revisions.
-- `terminal-update`: controlled Git fast-forward + validation + re-provision.
-- `terminal-rollback`: Git revision rollback + pinned component reconciliation.
+- `terminal-update`: controlled Git fast-forward + validation + source/config application only.
+- `terminal-deps`: explicit reconciliation of external tools/plugins to `versions.env`.
+- `terminal-rollback`: Git source/config rollback; dependency reconciliation remains explicit.
 - `terminal-doctor`: runtime diagnostics and degraded-mode visibility.
 - Zsh/PowerShell profiles: interactive behavior only.
 
@@ -29,4 +30,4 @@ Terminal Environment is designed around failure isolation. The operating-system 
 
 ## Visual system
 
-The default visual language is deliberately restrained: graphite surfaces, cool blue as the primary focus color, violet for references/links, green for executable/success state, amber for attention, and rose for failure. The prompt uses a structural two-line frame for the active command and a muted dot for transient historical prompts, so current input is visually distinct from scrollback. Standard `ls` remains the native command but receives color in interactive shells; `l`, `la`, `ll`, and `lt` use eza for richer icon-aware views.
+The default visual language is deliberately restrained: graphite surfaces, cool blue as the primary focus color, violet for references/links, green for executable/success state, amber for attention, and rose for failure. The prompt uses a compact single-line transcript-friendly form that preserves ordinary shell context when output is copied into SSH logs or AI chats. Standard `ls` remains the native command but receives color in interactive shells; `l`, `la`, `ll`, and `lt` use eza for richer icon-aware views.

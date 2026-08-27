@@ -8,11 +8,19 @@ prev=$(cat "$STATE/previous-commit" 2>/dev/null || true)
 [[ -z $(git -C "$SOURCE" status --porcelain) ]] || { echo 'Installed source has local changes; refusing rollback.' >&2; exit 2; }
 cur=$(git -C "$SOURCE" rev-parse HEAD)
 profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
+cur_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
+
 git -C "$SOURCE" reset --hard "$prev"
-PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh"
-PROFILE="$profile" "$SOURCE/scripts/build-zsh-plugins.sh"
+"$SOURCE/tests/smoke.sh" --source-only
 chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
-command -v deja >/dev/null 2>&1 && deja daemon --restart >/dev/null 2>&1 || true
+PROFILE="$profile" SYNC_PLUGINS=0 "$SOURCE/scripts/build-zsh-plugins.sh"
 printf '%s\n' "$cur" > "$STATE/previous-commit"
+new_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
+if [[ $cur_versions != "$new_versions" ]]; then
+  printf '%s\n' "$prev" > "$STATE/deps-pending"
+  echo "Rolled source/config back to $prev. Dependency manifest differs; run: terminal-deps sync"
+else
+  rm -f "$STATE/deps-pending"
+  echo "Rolled back to $prev"
+fi
 terminal-doctor --quick || true
-echo "Rolled back to $prev"

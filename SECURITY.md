@@ -2,7 +2,7 @@
 
 ## History and secrets
 
-Atuin's built-in secrets filter is explicitly enabled and additional command-pattern filters are configured. Zsh/Deja use `HIST_IGNORE_SPACE`/`HISTORY_IGNORE`. Prefix a sensitive command with a space to deliberately keep it out of managed history. No heuristic can identify every secret; do not paste long-lived credentials directly into command arguments when an environment file, stdin, or a secret manager is available.
+Atuin's built-in secrets filter is explicitly enabled and additional command-pattern filters are configured. Zsh history uses `HIST_IGNORE_SPACE`/`HISTORY_IGNORE`; zsh-autosuggestions consumes that filtered history and does not maintain a second command database. Prefix a sensitive command with a space to deliberately keep it out of managed history. No heuristic can identify every secret; do not paste long-lived credentials directly into command arguments when an environment file, stdin, or a secret manager is available.
 
 ## Downloads
 

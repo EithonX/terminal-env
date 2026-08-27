@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SOURCE="$HOME/.local/share/terminal-env/source"
+STATE="$HOME/.local/state/terminal-env"
+[[ -r "$SOURCE/versions.env" ]] || { echo 'Installed dependency manifest is missing.' >&2; exit 2; }
+# shellcheck disable=SC1091
+source "$SOURCE/versions.env"
+profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
+action=${1:-status}
+shift || true
+
+usage(){ cat <<'USAGE'
+Usage: terminal-deps [status|sync] [--dry-run]
+
+  status    Compare installed managed tools/plugins with versions.env.
+  sync      Reconcile dependencies to versions.env without updating repo source.
+USAGE
+}
+
+status_deps(){
+  if [[ $profile == minimal ]]; then echo 'Minimal profile intentionally omits optional managed dependencies.'; return 0; fi
+  local bad=0 actual expected head tag
+  printf 'Terminal Environment dependencies\n\n'
+  check_tool(){
+    local label=$1 cmd=$2 want=$3
+    actual=$(command "$cmd" --version 2>/dev/null | head -n1 || true)
+    if [[ -n $actual && $actual == *"$want"* ]]; then printf '  OK        %-22s %s\n' "$label" "$actual"
+    else printf '  MISMATCH  %-22s installed=%s  pinned=%s\n' "$label" "${actual:-missing}" "$want"; bad=1; fi
+  }
+  check_plugin_sha(){
+    local label=$1 name=$2 want=$3
+    head=$(git -C "$HOME/.local/share/terminal-env/zsh-plugins/$name" rev-parse HEAD 2>/dev/null || true)
+    if [[ -n $head && $head == "$want"* ]]; then printf '  OK        %-22s %s\n' "$label" "${head:0:12}"
+    else printf '  MISMATCH  %-22s installed=%s  pinned=%s\n' "$label" "${head:-missing}" "$want"; bad=1; fi
+  }
+  check_plugin_tag(){
+    local label=$1 name=$2 want=$3
+    tag=$(git -C "$HOME/.local/share/terminal-env/zsh-plugins/$name" describe --tags --exact-match 2>/dev/null || true)
+    if [[ $tag == "$want" ]]; then printf '  OK        %-22s %s\n' "$label" "$tag"
+    else printf '  MISMATCH  %-22s installed=%s  pinned=%s\n' "$label" "${tag:-missing}" "$want"; bad=1; fi
+  }
+
+  check_tool 'Oh My Posh' oh-my-posh "$OH_MY_POSH_VERSION"
+  check_tool 'Atuin' atuin "$ATUIN_VERSION"
+  check_tool 'fzf' fzf "$FZF_VERSION"
+  check_tool 'zoxide' zoxide "$ZOXIDE_VERSION"
+  check_tool 'chezmoi' chezmoi "$CHEZMOI_VERSION"
+  check_plugin_sha 'zsh-autosuggestions' zsh-autosuggestions "$ZSH_AUTOSUGGESTIONS_SHA"
+  check_plugin_sha 'zsh-completions' zsh-completions "$ZSH_COMPLETIONS_SHA"
+  check_plugin_sha 'fzf-tab' fzf-tab "$FZF_TAB_SHA"
+  check_plugin_tag 'syntax-highlighting' zsh-syntax-highlighting "$ZSH_SYNTAX_HIGHLIGHTING_REF"
+
+  if [[ -f "$STATE/deps-pending" ]]; then
+    printf '\n  ACTION    Source changed dependency pins. Run: terminal-deps sync\n'
+    bad=1
+  fi
+  (( bad == 0 ))
+}
+
+sync_deps(){
+  local dry=0
+  [[ ${1:-} == --dry-run ]] && dry=1
+  if (( dry )); then
+    PROFILE="$profile" DRY_RUN=1 "$SOURCE/scripts/install-tools-unix.sh"
+    [[ $profile == minimal ]] || PROFILE="$profile" DRY_RUN=1 SYNC_PLUGINS=1 "$SOURCE/scripts/build-zsh-plugins.sh"
+    return 0
+  fi
+
+  PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh"
+  [[ $profile == minimal ]] || PROFILE="$profile" SYNC_PLUGINS=1 "$SOURCE/scripts/build-zsh-plugins.sh"
+
+  # R7 and earlier managed Deja. Only retire it when the old installer marker
+  # proves Terminal Environment activated/imported it. Preserve its DB so a
+  # Git rollback can recover without data loss.
+  if [[ -f "$STATE/deja-imported" ]]; then
+    pkill -f 'deja daemon' >/dev/null 2>&1 || true
+    rm -f -- "$HOME/.local/bin/deja"
+    : > "$STATE/deja-retired"
+  fi
+  rm -f "$STATE/deps-pending"
+  command -v terminal-doctor >/dev/null 2>&1 && terminal-doctor --quick || true
+  echo 'Dependencies synced to the versions pinned by the installed source.'
+  [[ -f "$STATE/deja-retired" && -d "$HOME/.local/share/deja" ]] && echo 'Legacy Deja data was preserved for rollback/recovery.'
+}
+
+case "$action" in
+  status) status_deps ;;
+  sync) sync_deps "${1:-}" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

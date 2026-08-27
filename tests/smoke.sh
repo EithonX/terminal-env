@@ -39,7 +39,8 @@ assert t.get('shell_integration') is True
 v=(r/'versions.env').read_text()
 assert 'OH_MY_POSH_VERSION=30.7.0' in v
 alltext='\n'.join(p.read_text(errors='ignore') for p in r.rglob('*') if p.is_file() and '.git' not in p.parts)
-assert not any('zsh-'+'autosuggestions' in p.read_text(errors='ignore').lower() for p in r.rglob('*') if p.is_file() and 'tests' not in p.parts and '.git' not in p.parts)
+assert 'ZSH_AUTOSUGGESTIONS_REF=v0.7.1' in v
+assert 'DEJA_VERSION=' not in v
 assert ('ANTIDOTE'+'_VERSION=') not in v
 # chezmoi executable_ is a regular-file attribute, not a directory attribute.
 # Helpers must live under dot_local/bin/executable_<name>.
@@ -47,6 +48,7 @@ assert not (r/'executable_dot_local').exists()
 helpers = sorted((r/'dot_local/bin').glob('executable_terminal-*'))
 assert [p.name for p in helpers] == [
     'executable_terminal-backup',
+    'executable_terminal-deps',
     'executable_terminal-doctor',
     'executable_terminal-rollback',
     'executable_terminal-update',
@@ -68,6 +70,14 @@ assert "alias ls='eza" not in tools
 atuin=(r/'dot_config/atuin/config.toml').read_text()
 assert 'name = \"terminal-env\"' in atuin
 assert (r/'dot_config/atuin/themes/terminal-env.toml').is_file()
+pred=(r/'dot_config/zsh/conf.d/60-prediction.zsh').read_text()
+assert 'ZSH_AUTOSUGGEST_STRATEGY=(terminal_env_autosuggest)' in pred
+assert '_zsh_autosuggest_strategy_completion' in pred
+assert '_zsh_autosuggest_strategy_history' in pred
+update=(r/'dot_local/bin/executable_terminal-update').read_text()
+assert 'install-tools-unix.sh' not in update
+assert 'SYNC_PLUGINS=0' in update
+assert (r/'dot_local/bin/executable_terminal-deps').is_file()
 PY
 # Windows state writes must never rely on Set-Content positional binding.
 python3 - <<'PY2' || bad 'PowerShell Set-Content safety'
@@ -85,7 +95,23 @@ PY2
 if grep -RIn -- 'atuin history list --limit' "$ROOT/dot_local" "$ROOT/dot_config/terminal-env/powershell" >/dev/null 2>&1; then
   bad 'invalid Atuin doctor command'
 fi
-if command -v zsh >/dev/null 2>&1; then while IFS= read -r -d '' f; do check zsh -n "$f"; done < <(find "$ROOT/dot_config/zsh" -type f -name '*.zsh' -print0); fi
+if command -v zsh >/dev/null 2>&1; then
+  while IFS= read -r -d '' f; do check zsh -n "$f"; done < <(find "$ROOT/dot_config/zsh" -type f -name '*.zsh' -print0)
+  ROOT_FOR_ZSH="$ROOT" zsh -dfc '
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/60-prediction.zsh"
+    _zsh_autosuggest_strategy_history() { typeset -g suggestion="H:$1" }
+    _zsh_autosuggest_strategy_completion() { typeset -g suggestion="C:$1" }
+    _zsh_autosuggest_strategy_terminal_env_autosuggest "dock"
+    [[ $suggestion == "H:dock" ]] || exit 11
+    _zsh_autosuggest_strategy_terminal_env_autosuggest "cat PRO"
+    [[ $suggestion == "C:cat PRO" ]] || exit 12
+    _zsh_autosuggest_strategy_completion() { typeset -g suggestion="" }
+    _zsh_autosuggest_strategy_terminal_env_autosuggest "docker compose x"
+    [[ $suggestion == "H:docker compose x" ]] || exit 13
+    _zsh_autosuggest_strategy_terminal_env_autosuggest $'"'"'echo a\necho b'"'"'
+    [[ $suggestion == H:* ]] || exit 14
+  ' || bad 'context-aware autosuggestion strategy'
+fi
 if command -v shellcheck >/dev/null 2>&1; then shellcheck -x "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/scripts/"*.sh "$ROOT/scripts/lib/"*.sh "$ROOT/dot_local/bin/executable_terminal-"* || fail=1; fi
 (( source_only )) || echo "smoke: $([[ $fail == 0 ]] && echo PASS || echo FAIL)"
 exit "$fail"

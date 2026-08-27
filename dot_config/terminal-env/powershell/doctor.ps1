@@ -10,5 +10,6 @@ $frag=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\terminal
 $font=(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts' -ErrorAction SilentlyContinue).PSObject.Properties.Name|Where-Object{$_ -match 'MonaspiceNe'};if($font){P 'Monaspice Neon font registered'}else{W 'Monaspice Neon font was not detected'}
 try{atuin search --limit 1 --cmd-only '' *> $null;if($LASTEXITCODE -eq 0){P 'Atuin history database is readable'}else{W 'Atuin history database check failed'}}catch{W 'Atuin history database check failed'}
 if(Test-Path (Join-Path $source '.git')){P 'installed source is Git-backed and updateable'}else{W 'installed source is not Git-backed'}
+if(Test-Path (Join-Path $state 'deps-pending')){W 'source update changed dependency pins; run terminal-deps sync'}else{P 'dependency manifest is synchronized with the last source apply'}
 if(Test-Path (Join-Path $source 'tests\smoke.ps1')){try{& (Join-Path $source 'tests\smoke.ps1') *> $null;P 'installed source smoke tests pass'}catch{F 'installed source smoke tests failed'}}
 Write-Host "`nSummary: $pass pass, $warn warning, $fail failure"; if($fail){exit 1}

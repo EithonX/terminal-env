@@ -4,7 +4,7 @@ A reproducible cross-platform terminal environment built for predictable AI-gene
 
 ## Default experience
 
-**Linux/macOS:** Zsh + Deja + Atuin + native completion/zsh-completions + fzf-tab + zsh-syntax-highlighting + fzf + zoxide + Oh My Posh. Server profiles also install tmux.
+**Linux/macOS:** Zsh + a context-aware zsh-autosuggestions strategy + Atuin + native completion/zsh-completions + fzf-tab + zsh-syntax-highlighting + fzf + zoxide + Oh My Posh. Server profiles also install tmux.
 
 **Windows:** PowerShell 7 + PSReadLine history prediction + Atuin + fzf + zoxide + the same Oh My Posh theme.
 
@@ -43,11 +43,12 @@ Useful flags: `--dry-run`, `--no-shell-change`, `--no-font` and PowerShell equiv
 ## Operations
 
 - `terminal-doctor`: diagnostics and degraded-mode visibility.
-- `terminal-update`: explicit update path; nothing silently auto-updates in the background.
+- `terminal-update`: update our GitHub-backed source/config only; `--check` reports availability without applying.
+- `terminal-deps`: inspect or sync the external versions pinned by the currently installed source.
 - `terminal-backup`: local shell/config snapshot.
-- `terminal-rollback`: restore the previously applied Git revision and its pinned managed binaries/configuration.
+- `terminal-rollback`: restore the previously applied Git source/config revision. If its dependency manifest differs, it explicitly asks for `terminal-deps sync`.
 
-Existing shell configuration is backed up before install. Optional integrations are fail-open: missing Deja means no prediction; missing Atuin means native history; missing fzf means native completion; missing Oh My Posh means a native prompt.
+Existing shell configuration is backed up before install. Optional integrations are fail-open: missing zsh-autosuggestions means no ghost prediction; missing Atuin means native history; missing fzf means native completion; missing Oh My Posh means a native prompt.
 
 ## Repository model
 
@@ -67,9 +68,16 @@ The installers choose the profile automatically and are intentionally non-intera
 
 ## Update and rollback
 
-Nothing updates during shell startup. `terminal-update` pulls a Git-backed installed source, runs smoke tests before applying it, rebuilds static integrations, applies the new target state, and runs diagnostics. Updates record the prior commit for `terminal-rollback` on both Unix and Windows, and re-provision pinned binaries when rolling back.
+Nothing updates during shell startup. Source and dependency updates are deliberately separate:
 
-The normal Zsh startup path performs no Git operations and no package-manager work. fzf, zoxide, Atuin and Deja integration code is cached/generated during setup where supported.
+- `terminal-update --check` fetches metadata and reports whether the configured Git upstream has new commits.
+- `terminal-update` fast-forwards the installed Git source, runs smoke tests, applies only our managed configuration, and records the previous commit for rollback. It does **not** run apt/Homebrew/WinGet or upgrade portable tools.
+- If the update changed `versions.env`, a `deps-pending` state is recorded and the command tells you to run `terminal-deps sync`. This prevents external dependency changes from being silently mixed into a repo/config update.
+- `terminal-deps status` shows the installed/pinned dependency state. `terminal-deps sync` explicitly reconciles external tools/plugins to the versions declared by the current repo without fetching a newer repo revision.
+
+For automatic GitHub updates, perform the initial install from a normal Git clone. The installer preserves its `.git` metadata and upstream remote inside the managed source, so every later `terminal-update` follows that repository/branch. Archive installs stay intentionally non-updateable until reinstalled once from a clone.
+
+The normal Zsh startup path performs no Git operations and no package-manager work. fzf, zoxide and Atuin integration code is cached/generated during setup where supported.
 
 ## Safety model
 
@@ -77,14 +85,14 @@ The normal Zsh startup path performs no Git operations and no package-manager wo
 - Uninstall restores the original pre-install state by default; OS packages are left alone because their prior ownership cannot be proven.
 - Atuin sync and its update checker are off by default.
 - Oh My Posh update notices/automatic upgrades are off; repository updates own version changes.
-- Deja and native Zsh history honor leading-space history exclusion; additional credential-shaped command filters are configured for both Zsh/Deja and Atuin.
+- Native Zsh history honors leading-space history exclusion; zsh-autosuggestions reads that filtered history, while Atuin has its own additional credential-shaped filters.
 - Ghostty paste protection is enabled; Windows Terminal keeps its own paste-warning behavior.
 - Root gets a restrained but visible prompt treatment, while the sudo-toggle key is disabled for root.
 - Optional components fail open instead of preventing a shell from starting.
 
 ## Rendering
 
-The visual system is deliberately restrained: graphite-black surface, neutral text, ice-blue primary focus, violet repository/reference context, amber attention, green executable/success state and controlled rose failure. Runtime/tool glyphs are Nerd Font icons, not emoji. The active prompt is a two-line structural frame; executed commands collapse to a muted dot instead of reusing the active prompt marker. Persistent decorative information is avoided; runtime segments appear contextually, command duration appears only after two seconds, and success status stays silent.
+The visual system is deliberately restrained: graphite-black surface, neutral text, ice-blue primary focus, violet repository/reference context, amber attention, green executable/success state and controlled rose failure. Runtime/tool glyphs are Nerd Font icons, not emoji. The prompt is a compact single-line transcript-friendly form so copied SSH output keeps ordinary terminal context instead of decorative transient markers. Persistent decorative information is avoided and success state stays silent.
 
 The workstation font is Monaspice Neon Nerd Font. Windows Terminal is configured through an additive fragment and a backed-up default-profile edit. Ghostty uses native shell integration, prompt navigation, clipboard protections and the same palette.
 The shared prompt is adaptive rather than identical-looking everywhere: local workstations omit machine identity, SSH sessions add only the remote hostname, and root is conveyed by the active prompt accent instead of a permanent `root@host` banner.

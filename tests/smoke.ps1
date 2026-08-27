@@ -41,3 +41,10 @@ foreach ($file in $files) {
 }
 
 Write-Host 'smoke: PASS' -ForegroundColor Green
+
+$versions = Get-Content -LiteralPath (Join-Path $root 'versions.env') -Raw
+if ($versions -notmatch '(?m)^ZSH_AUTOSUGGESTIONS_REF=v0\.7\.1$') { throw 'zsh-autosuggestions pin is missing' }
+if ($versions -match '(?m)^DEJA_VERSION=') { throw 'Deja must not remain a managed default dependency' }
+$updateText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\update.ps1') -Raw
+if ($updateText -match 'install\.ps1') { throw 'terminal-update must not conflate source updates with dependency installation' }
+if (-not (Test-Path -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1'))) { throw 'PowerShell terminal-deps implementation is missing' }

@@ -7,11 +7,12 @@ restore=1; [[ ${1:-} == --no-restore ]] && restore=0
 orig_shell=$(cat "$STATE/original-shell" 2>/dev/null || true)
 managed=(
   .zshenv .config/zsh .config/oh-my-posh .config/atuin .config/ghostty .config/tmux .config/terminal-env
-  .local/bin/terminal-doctor .local/bin/terminal-update .local/bin/terminal-rollback .local/bin/terminal-backup
-  .local/bin/oh-my-posh .local/bin/atuin .local/bin/fzf .local/bin/zoxide .local/bin/deja .local/bin/chezmoi
+  .local/bin/terminal-doctor .local/bin/terminal-update .local/bin/terminal-rollback .local/bin/terminal-backup .local/bin/terminal-deps
+  .local/bin/oh-my-posh .local/bin/atuin .local/bin/fzf .local/bin/zoxide .local/bin/chezmoi
   .local/share/terminal-env/zsh-plugins .cache/terminal-env
 )
 for rel in "${managed[@]}"; do rm -rf -- "$HOME/$rel"; done
+if [[ -f "$STATE/deja-imported" ]]; then pkill -f 'deja daemon' >/dev/null 2>&1 || true; rm -f -- "$HOME/.local/bin/deja"; fi
 # Source is removed only after its uninstall script has finished reading.
 source_tree="$HOME/.local/share/terminal-env/source"
 if (( restore )) && [[ -n $BACKUP && -d $BACKUP ]]; then

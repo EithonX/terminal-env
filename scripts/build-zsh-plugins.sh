@@ -4,6 +4,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$ROOT/scripts/lib/common.sh"
 source "$ROOT/versions.env"
 DRY_RUN=${DRY_RUN:-0}
+SYNC_PLUGINS=${SYNC_PLUGINS:-1}
 PLUGIN_ROOT="$HOME/.local/share/terminal-env/zsh-plugins"
 GEN_DIR="$HOME/.cache/terminal-env/zsh"
 
@@ -29,9 +30,12 @@ install_plugin() {
 
 ensure_dir "$PLUGIN_ROOT"
 ensure_dir "$GEN_DIR"
-install_plugin zsh-users/zsh-completions "$ZSH_COMPLETIONS_REF" zsh-completions "$ZSH_COMPLETIONS_SHA"
-install_plugin Aloxaf/fzf-tab "$FZF_TAB_REF" fzf-tab "$FZF_TAB_SHA"
-install_plugin zsh-users/zsh-syntax-highlighting "$ZSH_SYNTAX_HIGHLIGHTING_REF" zsh-syntax-highlighting
+if [[ $SYNC_PLUGINS == 1 ]]; then
+  install_plugin zsh-users/zsh-autosuggestions "$ZSH_AUTOSUGGESTIONS_REF" zsh-autosuggestions "$ZSH_AUTOSUGGESTIONS_SHA"
+  install_plugin zsh-users/zsh-completions "$ZSH_COMPLETIONS_REF" zsh-completions "$ZSH_COMPLETIONS_SHA"
+  install_plugin Aloxaf/fzf-tab "$FZF_TAB_REF" fzf-tab "$FZF_TAB_SHA"
+  install_plugin zsh-users/zsh-syntax-highlighting "$ZSH_SYNTAX_HIGHLIGHTING_REF" zsh-syntax-highlighting
+fi
 
 if [[ $DRY_RUN == 0 ]]; then
   cat > "$GEN_DIR/fpath.zsh.tmp" <<EOF2

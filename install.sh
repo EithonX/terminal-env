@@ -63,12 +63,12 @@ MANAGED_TARGETS=(
   "$HOME/.local/bin/atuin"
   "$HOME/.local/bin/fzf"
   "$HOME/.local/bin/zoxide"
-  "$HOME/.local/bin/deja"
   "$HOME/.local/bin/chezmoi"
   "$HOME/.local/bin/terminal-doctor"
   "$HOME/.local/bin/terminal-update"
   "$HOME/.local/bin/terminal-rollback"
   "$HOME/.local/bin/terminal-backup"
+  "$HOME/.local/bin/terminal-deps"
 )
 
 HELPER_TARGETS=(
@@ -76,6 +76,7 @@ HELPER_TARGETS=(
   "$HOME/.local/bin/terminal-update"
   "$HOME/.local/bin/terminal-rollback"
   "$HOME/.local/bin/terminal-backup"
+  "$HOME/.local/bin/terminal-deps"
 )
 
 canonical_dir(){ (cd -- "$1" 2>/dev/null && pwd -P) || return 1; }
@@ -161,7 +162,7 @@ EOF2
   if [[ -d "$legacy_helper_dir/bin" ]]; then
     legacy_safe=1
     while IFS= read -r -d '' legacy_file; do
-      case "${legacy_file##*/}" in terminal-doctor|terminal-update|terminal-rollback|terminal-backup) ;; *) legacy_safe=0;; esac
+      case "${legacy_file##*/}" in terminal-doctor|terminal-update|terminal-rollback|terminal-backup|terminal-deps) ;; *) legacy_safe=0;; esac
     done < <(find "$legacy_helper_dir" -type f -print0 2>/dev/null)
     if (( legacy_safe )); then rm -rf -- "$legacy_helper_dir"; else warn "Legacy $legacy_helper_dir exists with unrelated files; leaving it untouched."; fi
   fi
@@ -174,18 +175,20 @@ EOF2
 
   if [[ $PROFILE != minimal ]]; then PROFILE="$PROFILE" "$SOURCE/scripts/build-zsh-plugins.sh"; fi
 
+  # R7 and earlier managed Deja. When upgrading through a full installer run,
+  # retire only the binary/daemon proven to have been activated by this project;
+  # preserve its local DB so rollback remains lossless.
+  if [[ -f "$STATE/deja-imported" ]]; then
+    pkill -f 'deja daemon' >/dev/null 2>&1 || true
+    rm -f -- "$HOME/.local/bin/deja"
+    : > "$STATE/deja-retired"
+  fi
+
   if command -v atuin >/dev/null 2>&1 && [[ ! -f "$STATE/atuin-imported" ]]; then
     import_hist=""; [[ -s "$new_hist" ]] && import_hist="$new_hist"; [[ -z "$import_hist" && -s "$old_hist" ]] && import_hist="$old_hist"
     if [[ -n "$import_hist" ]] && HISTFILE="$import_hist" atuin import zsh >/dev/null 2>&1; then : > "$STATE/atuin-imported"; fi
   fi
 
-  if command -v deja >/dev/null 2>&1; then
-    deja init zsh >/dev/null 2>&1 || true
-    if [[ ! -f "$STATE/deja-imported" ]]; then
-      hist=""; [[ -s "$new_hist" ]] && hist="$new_hist"; [[ -z "$hist" && -s "$old_hist" ]] && hist="$old_hist"
-      if [[ -n "$hist" ]] && deja import --file "$hist" >/dev/null 2>&1; then : > "$STATE/deja-imported"; elif [[ -z "$hist" ]]; then : > "$STATE/deja-imported"; fi
-    fi
-  fi
 fi
 
 if [[ $DRY_RUN == 0 && $NO_SHELL_CHANGE == 0 && $PROFILE != minimal ]]; then

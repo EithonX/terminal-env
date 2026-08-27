@@ -16,5 +16,5 @@ setopt HIST_IGNORE_SPACE
 setopt HIST_VERIFY
 
 # Commands intentionally prefixed with a space are never persisted. Obvious inline
-# credential forms are also excluded so Deja, which honors HISTORY_IGNORE, does not learn them.
+# credential forms are also excluded so history-backed inline suggestions do not resurface them.
 HISTORY_IGNORE='( *|*(Authorization:[[:space:]]#Bearer|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]=|[Ss][Ee][Cc][Rr][Ee][Tt]=|[Tt][Oo][Kk][Ee][Nn]=|[Aa][Pp][Ii]_[Kk][Ee][Yy]=)*)'
