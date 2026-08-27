@@ -1,127 +1,98 @@
 # Terminal Environment
 
-A reproducible cross-platform terminal environment built for predictable AI-generated commands, expert interactive use, restrained presentation, and graceful failure.
+A fast, opinionated terminal setup for Windows, macOS, and Ubuntu/Debian.
 
-## Default experience
+Good defaults, native shells, useful history, real completion, and no giant shell framework.
 
-**Linux/macOS:** Zsh + a context-aware zsh-autosuggestions strategy + Atuin + native completion/zsh-completions + fzf-tab + zsh-syntax-highlighting + fzf + zoxide + Oh My Posh. Server profiles also install tmux.
+## What you get
 
-**Windows:** PowerShell 7 + PSReadLine history prediction + Atuin + fzf + zoxide + the same Oh My Posh theme.
-
-Oh My Posh streaming is enabled at 100 ms. Upstream automatically restarts the renderer and falls back to classic rendering after repeated failures, so the default gets the speed benefit without making prompt rendering a single point of failure.
-
-The default prompt is intentionally single-line and transcript-friendly: current path and Git context stay visible on the same line as the command, which keeps SSH copy/paste, AI troubleshooting, and long scrollback cleaner than a decorative multi-line prompt.
+- **Windows:** PowerShell 7 + PSReadLine + Atuin + Windows Terminal.
+- **Linux/macOS:** Zsh + smart history/completion suggestions + Atuin + fzf-tab.
+- **Everywhere:** Oh My Posh, fzf, zoxide, a restrained theme, diagnostics, rollback, and Git-backed updates.
+- Core commands stay core commands. `ls` is still `ls`; `rm` is still `rm`.
+- Shell startup does not pull Git, install packages, or phone home.
+- Optional pieces fail open. A missing prompt or fuzzy finder should never brick your shell.
 
 ## Install
+
+Clone the repository, then run the installer from the clone.
+
+### Windows 10/11
+
+Open PowerShell 7:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\install.ps1 -Profile workstation
+```
+
+Requires WinGet. The installer creates a **Terminal Environment** Windows Terminal profile that runs `pwsh.exe` (PowerShell 7).
+
+### macOS
+
+Homebrew is required once for system packages:
 
 ```sh
 bash ./install.sh
 ```
 
-```powershell
-.\install.ps1
+The workstation profile uses the system Zsh and installs Ghostty through Homebrew.
+
+### Ubuntu / Debian
+
+```sh
+bash ./install.sh
 ```
 
-The default profile is inferred: headless/SSH Linux becomes `server`; desktop Linux/macOS/Windows becomes `workstation`. Override with `--profile server|workstation|minimal` or PowerShell `-Profile`.
+SSH/headless Linux selects the `server` profile automatically. Desktop Linux selects `workstation`. Do **not** run the installer with `sudo`; it requests sudo only when system packages need it.
 
-Useful flags: `--dry-run`, `--no-shell-change`, `--no-font` and PowerShell equivalents.
+## Daily keys
 
-## Behavioral contract
+| Key | Action |
+|---|---|
+| `→` | Accept the full inline suggestion |
+| `Ctrl+→` | Accept the next suggested word |
+| `↑` / `↓` | Prefix-aware shell history |
+| `Ctrl+R` | Atuin history search |
+| `Tab` | Completion through fzf-tab on Zsh |
+| `Ctrl+T` | Fuzzy file insertion |
+| `Alt+C` | Fuzzy directory navigation |
 
-- Right: accept complete prediction.
-- Ctrl+Right: accept next predicted word.
-- Up/Down: deterministic prefix-aware native history traversal.
-- Ctrl+R: Atuin deep history; native history remains the fallback.
-- Tab: actual shell completion; fzf-tab is presentation only.
-- Shift+Tab: previous completion candidate.
-- Ctrl+T: fuzzy file insertion when fzf is present.
-- Alt+C: fuzzy directory navigation when fzf is present.
-- Esc Esc: sudo toggle only for non-root Unix users with sudo.
-- Core commands are never replaced by lookalikes: `ls` and `grep` receive color-only interactive aliases, while `l`/`la`/`ll`/`lt` explicitly opt into eza; `cat`, `rm`, `cp`, `mv`, and other core commands retain their native behavior.
-- Multiline paste is left in the editable buffer; this setup never intentionally auto-executes pasted commands.
+Zsh inline suggestions use both command history and the real Zsh completion system, so unseen files, folders, Git refs, flags, and service names can be suggested when their completer exposes them.
 
-## Operations
+## Updates
 
-- `terminal-doctor`: diagnostics and degraded-mode visibility.
-- `terminal-update`: update our GitHub-backed source/config only; `--check` reports availability without applying.
-- `terminal-deps`: inspect or sync the external versions pinned by the currently installed source.
-- `terminal-backup`: local shell/config snapshot.
-- `terminal-rollback`: restore the previously applied Git source/config revision. If its dependency manifest differs, it explicitly asks for `terminal-deps sync`.
+Repository changes and dependency changes are deliberately separate:
 
-Existing shell configuration is backed up before install. Optional integrations are fail-open: missing zsh-autosuggestions means no ghost prediction; missing Atuin means native history; missing fzf means native completion; missing Oh My Posh means a native prompt.
+```sh
+terminal-update --check
+terminal-update
+terminal-deps status
+terminal-deps sync
+```
 
-## Repository model
+PowerShell uses the same commands with `-Check` instead of `--check`.
 
-chezmoi owns configuration rendering. The installer owns provisioning and migration. Plugin load files are generated statically during setup/update so opening a shell does not run a plugin manager or perform network access.
-
-Secrets, history databases, SSH host definitions, GPG material, and local machine state are intentionally outside this repository.
+`terminal-update` fast-forwards the installed Git source and applies config only. `terminal-deps sync` reconciles third-party tools to the versions pinned in `versions.env`.
 
 ## Profiles
 
-| Profile | Intended use | Default additions |
-|---|---|---|
-| `server` | SSH/VPS/headless Linux | Zsh intelligence stack + tmux; no font/GUI terminal |
-| `workstation` | Windows/macOS/Linux desktop | Native terminal renderer + font + full interactive stack |
-| `minimal` | Recovery/lightweight Unix environment | Core shell/config only; optional integrations simply stay absent |
+- `workstation` — full interactive setup and fonts.
+- `server` — SSH/VPS setup with tmux; no local font install.
+- `minimal` — small recovery-friendly shell foundation.
 
-The installers choose the profile automatically and are intentionally non-interactive. Explicit flags exist for automation and exceptional machines, not because setup requires a configuration questionnaire.
+## Platforms
 
-## Update and rollback
+- **Windows 10/11:** WinGet + PowerShell 7 + Windows Terminal.
+- **macOS:** Homebrew; Ghostty is installed as a cask.
+- **Ubuntu/Debian:** `apt`. Ghostty is optional and only installed when the distro provides it; the shell works in any terminal.
 
-Nothing updates during shell startup. Source and dependency updates are deliberately separate:
+Run `terminal-doctor` after installation if anything looks wrong.
 
-- `terminal-update --check` fetches metadata and reports whether the configured Git upstream has new commits.
-- `terminal-update` fast-forwards the installed Git source, runs smoke tests, applies only our managed configuration, and records the previous commit for rollback. It does **not** run apt/Homebrew/WinGet or upgrade portable tools.
-- If the update changed `versions.env`, a `deps-pending` state is recorded and the command tells you to run `terminal-deps sync`. This prevents external dependency changes from being silently mixed into a repo/config update.
-- `terminal-deps status` shows the installed/pinned dependency state. `terminal-deps sync` explicitly reconciles external tools/plugins to the versions declared by the current repo without fetching a newer repo revision.
+## Project notes
 
-For automatic GitHub updates, perform the initial install from a normal Git clone. The installer preserves its `.git` metadata and upstream remote inside the managed source, so every later `terminal-update` follows that repository/branch. Archive installs stay intentionally non-updateable until reinstalled once from a clone.
+- [Architecture](ARCHITECTURE.md)
+- [Security](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
 
-The normal Zsh startup path performs no Git operations and no package-manager work. fzf, zoxide and Atuin integration code is cached/generated during setup where supported.
-
-## Safety model
-
-- Existing managed-path configuration and portable binaries are backed up before first replacement.
-- Uninstall restores the original pre-install state by default; OS packages are left alone because their prior ownership cannot be proven.
-- Atuin sync and its update checker are off by default.
-- Oh My Posh update notices/automatic upgrades are off; repository updates own version changes.
-- Native Zsh history honors leading-space history exclusion; zsh-autosuggestions reads that filtered history, while Atuin has its own additional credential-shaped filters.
-- Ghostty paste protection is enabled; Windows Terminal keeps its own paste-warning behavior.
-- Root gets a restrained but visible prompt treatment, while the sudo-toggle key is disabled for root.
-- Optional components fail open instead of preventing a shell from starting.
-
-## Rendering
-
-The visual system is deliberately restrained: graphite-black surface, neutral text, ice-blue primary focus, violet repository/reference context, amber attention, green executable/success state and controlled rose failure. Runtime/tool glyphs are Nerd Font icons, not emoji. The prompt is a compact single-line transcript-friendly form so copied SSH output keeps ordinary terminal context instead of decorative transient markers. Persistent decorative information is avoided and success state stays silent.
-
-The workstation font is Monaspice Neon Nerd Font. Windows Terminal is configured through an additive fragment and a backed-up default-profile edit. Ghostty uses native shell integration, prompt navigation, clipboard protections and the same palette.
-The shared prompt is adaptive rather than identical-looking everywhere: local workstations omit machine identity, SSH sessions add only the remote hostname, and root is conveyed by the active prompt accent instead of a permanent `root@host` banner.
-
-## Development
-
-Run:
-
-```sh
-bash ./tests/smoke.sh
-bash ./install.sh --dry-run --profile server --no-shell-change --no-font
-```
-
-CI parses Unix shell files on Ubuntu/macOS and validates the Windows installer with PowerShell on Windows. The repository intentionally contains no secrets, machine-specific SSH hosts, shell history, GPG material, or user identity configuration. Optional per-machine overrides live in `~/.config/terminal-env/local.zsh` or `local.ps1` and are not managed.
-
-## Storage and lifecycle policy
-
-Terminal Environment owns its temporary downloads and transaction snapshots instead of allowing them to grow without bound.
-
-- Release archives are downloaded into the operating system temp directory and removed in a `finally`/trap path after each provisioning step.
-- Workstation font setup downloads Nerd Fonts' compact `Monaspace.tar.xz` asset and extracts only the four Monaspice Neon RIBBI faces: Regular, Bold, Italic, and Bold Italic. The full font archive is never retained.
-- The original pre-install restore point is preserved until a normal uninstall restores it.
-- Successful automatic transaction backups are stored under `~/.local/state/terminal-env/backups/transactions` and only the newest three are retained in addition to the original restore point.
-- A failed transaction is removed after rollback succeeds, unless that snapshot is the original restore point. If rollback itself has trouble, the snapshot is intentionally preserved for recovery.
-- `terminal-backup` writes user-requested archives under `backups/manual`; manual backups are never automatically deleted.
-- `terminal-doctor` reports retained backup size and managed font footprint so storage growth is visible.
-
-Windows fonts are treated as immutable runtime assets because Windows can lock a registered font while a terminal process is using it. If the desired face is already byte-identical it is reused. A changed managed face is written under a versioned filename instead of overwriting a loaded file; obsolete Terminal Environment-owned versions are garbage-collected when Windows releases their locks. Pre-existing/unversioned fonts are never deleted merely because their names resemble our font.
-
-On Linux, workstation fonts live in the current user's font directory and `fc-cache` is refreshed. On macOS they live in `~/Library/Fonts`, Apple's documented current-user font location. Server profiles do not install fonts because the SSH client renders them.
-
-Native package-manager caches (APT, Homebrew, WinGet) are intentionally not purged by Terminal Environment because they are shared operating-system/package-manager state rather than files owned by this project.
+MIT licensed.

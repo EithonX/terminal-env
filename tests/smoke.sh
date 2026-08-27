@@ -70,6 +70,10 @@ assert "alias ls='eza" not in tools
 atuin=(r/'dot_config/atuin/config.toml').read_text()
 assert 'name = \"terminal-env\"' in atuin
 assert (r/'dot_config/atuin/themes/terminal-env.toml').is_file()
+wt=json.loads((r/'dot_config/windows-terminal/terminal-env.json').read_text())
+updates={p.get('updates'):p for p in wt.get('profiles',[]) if isinstance(p,dict) and p.get('updates')}
+assert updates['{574e775e-4f2a-5b96-ac1e-a2962a402336}']['hidden'] is True
+assert updates['{5fb123f1-af88-5b5c-8953-d14a8def1978}']['hidden'] is True
 pred=(r/'dot_config/zsh/conf.d/60-prediction.zsh').read_text()
 assert 'ZSH_AUTOSUGGEST_STRATEGY=(terminal_env_autosuggest)' in pred
 assert '_zsh_autosuggest_strategy_completion' in pred
@@ -79,11 +83,14 @@ assert 'install-tools-unix.sh' not in update
 assert 'SYNC_PLUGINS=0' in update
 assert (r/'dot_local/bin/executable_terminal-deps').is_file()
 install_unix=(r/'scripts/install-tools-unix.sh').read_text()
+assert 'local pkgs=(zsh ' not in install_unix
+assert 'optional+=(shellcheck' not in install_unix
 assert 'Monaspace.tar.xz' in install_unix
 assert 'Monaspace.zip' not in install_unix
 for face in ('Regular','Bold','Italic','BoldItalic'):
     assert face in install_unix
 installer=(r/'install.sh').read_text()
+assert 'Do not run Terminal Environment with sudo' in installer
 assert 'backups/transactions/install-' in installer
 assert 'prune_transaction_backups 3' in installer
 manual=(r/'dot_local/bin/executable_terminal-backup').read_text()

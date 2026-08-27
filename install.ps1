@@ -164,7 +164,7 @@ function Install-ManagedFonts {
             if($current -contains [IO.Path]::GetFullPath($file.FullName)){ continue }
             try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop } catch { $stale += $file.FullName }
         }
-        # R7's installer copied every Monaspice Neon variant under the upstream
+        # Early development builds copied every Monaspice Neon variant under the upstream
         # filename and registered it as '<BaseName> (TrueType)'. That exact
         # registry/path fingerprint is sufficient to clean its surplus faces
         # without touching unrelated user fonts. Reused RIBBI files stay put.
@@ -282,7 +282,7 @@ try {
         Backup-Path (Join-Path $State 'fonts')
         foreach($b in 'oh-my-posh.exe','atuin.exe','fzf.exe','zoxide.exe','chezmoi.exe'){ Backup-Path (Join-Path $Bin $b) }
         if(-not $SameSource){ Backup-Path $Source }
-        # r5 briefly used positional Set-Content arguments. On a failed first run it
+        # An early development build used positional Set-Content arguments. On a failed first run it
         # could create a file named after the profile in the checkout. Remove only
         # that exact artifact when its contents prove it belongs to this installer.
         $legacyMarker = Join-Path $Root $Profile

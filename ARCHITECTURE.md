@@ -1,44 +1,33 @@
 # Architecture
 
-Terminal Environment is designed around failure isolation. The operating-system package manager owns system prerequisites; pinned standalone binaries own interactive intelligence; chezmoi owns rendered configuration; the login shell never performs package or network work.
+Terminal Environment keeps shell behavior, package installation, and updates separate on purpose.
 
-## Invariants
+## Rules
 
-1. Core commands keep their native semantics.
-2. Optional intelligence fails open: zsh-autosuggestions, Atuin, fzf, Oh My Posh, and enhanced completions may disappear without preventing a usable shell.
-3. Native shell history remains available beneath enhanced history.
-4. Install and update actions create recoverable state before replacing managed files.
-5. Updates are explicit and Git-backed; shell startup never self-updates.
-6. Secrets and history databases never belong in the repository.
-7. Platform-specific shells/renderers are allowed when they improve the native experience; interaction meaning stays consistent.
-8. Machine-local customization is an escape hatch, not a setup requirement. Defaults are the product.
+1. **Native shells win.** PowerShell 7 on Windows; Zsh on macOS/Linux.
+2. **Core commands are not replaced.** Rich alternatives are explicit (`ll`, `lt`, `bat`, `rg`, etc.).
+3. **Interactive extras fail open.** A broken Atuin/fzf/prompt integration must still leave a usable shell.
+4. **No network work during shell startup.** Installation and updates are explicit actions.
+5. **The repo is the configuration source; `versions.env` is the dependency contract.**
+6. **Machine-local secrets and history never belong in Git.**
 
 ## Ownership
 
-- `install.sh` / `install.ps1`: provisioning, migration, backups, initial application.
-- `chezmoi`: deterministic target-state rendering.
-- `versions.env`: pinned portable dependency versions and plugin revisions.
-- `terminal-update`: controlled Git fast-forward + validation + source/config application only.
-- `terminal-deps`: explicit reconciliation of external tools/plugins to `versions.env`.
-- `terminal-rollback`: Git source/config rollback; dependency reconciliation remains explicit.
-- `terminal-doctor`: runtime diagnostics and degraded-mode visibility.
-- Zsh/PowerShell profiles: interactive behavior only.
+- `install.sh` / `install.ps1` — first install, migration, backups, system prerequisites.
+- `chezmoi` — renders managed configuration.
+- `terminal-update` — fast-forward Git source + validate + apply configuration.
+- `terminal-deps` — reconcile external tools/plugins to `versions.env`.
+- `terminal-rollback` — return to the previous applied Git revision.
+- `terminal-doctor` — diagnose the installed environment.
 
-## Profiles
+## Interaction model
 
-`server` avoids workstation font/GUI dependencies and adds tmux. `workstation` enables the full renderer/font experience. `minimal` installs only enough foundation for a safe shell and deliberately leaves optional intelligence absent.
+On Zsh, inline suggestions combine history with the native completion engine. Tab remains explicit completion through fzf-tab; Ctrl+R belongs to Atuin. On Windows, PSReadLine owns inline prediction and Atuin owns deep history search.
 
-## Visual system
+Windows Terminal receives an additive fragment rather than a replacement settings file. The custom profile launches `pwsh.exe`, and the redundant auto-generated PowerShell 7 profiles are hidden through fragment updates while the legacy Windows PowerShell profile is left available for compatibility.
 
-The default visual language is deliberately restrained: graphite surfaces, cool blue as the primary focus color, violet for references/links, green for executable/success state, amber for attention, and rose for failure. The prompt uses a compact single-line transcript-friendly form that preserves ordinary shell context when output is copied into SSH logs or AI chats. Standard `ls` remains the native command but receives color in interactive shells; `l`, `la`, `ll`, and `lt` use eza for richer icon-aware views.
+## Storage
 
-## Storage ownership
+The original pre-install restore point is retained until uninstall. The newest three successful automatic transaction snapshots are retained. Manual backups are never auto-pruned. Temporary release/font archives are deleted after provisioning.
 
-Runtime storage has four ownership classes:
-
-1. **Ephemeral downloads**: OS temp storage only; always removed after provisioning attempts.
-2. **Original restore point**: immutable pre-install state kept until normal uninstall restores it.
-3. **Transaction snapshots**: automatic safety state; newest three successful snapshots retained, failed snapshots removed after successful rollback, with the original restore point excluded from pruning.
-4. **Manual backups**: explicit user artifacts; never auto-pruned.
-
-Fonts follow the same ownership rule. Terminal Environment installs only the Regular/Italic/Bold/Bold-Italic set. New managed font versions use filenames containing `.terminal-env-<version>`; only that namespace is eligible for automatic garbage collection. Existing unversioned fonts may be reused by hash but are not claimed for deletion.
+Workstation font installation keeps only Regular, Bold, Italic, and Bold Italic Monaspice Neon Nerd Font faces. Server profiles install no fonts because the SSH client renders them.

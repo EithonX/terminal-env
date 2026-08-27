@@ -10,7 +10,12 @@ $txCount=@(Get-ChildItem -LiteralPath $tx -Directory -Filter 'install-*' -ErrorA
 $manualCount=@(Get-ChildItem -LiteralPath $manual -File -Filter 'manual-*' -ErrorAction SilentlyContinue).Count
 P "storage: $txCount retained transaction backup(s), $(Human (Size-Bytes $tx))"
 P "manual backups: $manualCount, $(Human (Size-Bytes $manual)) (never auto-pruned)"
-foreach($c in 'pwsh','git','oh-my-posh','atuin','fzf','zoxide','chezmoi'){ $x=Get-Command $c -ErrorAction SilentlyContinue;if($x){P "${c}: $($x.Source)"}else{W "$c is missing; related features degrade gracefully"} }
+$pwsh=Get-Command pwsh -ErrorAction SilentlyContinue
+if($pwsh){
+    try{$pwshVersion=(& $pwsh.Source -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' | Out-String).Trim()}catch{$pwshVersion='unknown'}
+    P "PowerShell: $pwshVersion ($($pwsh.Source))"
+}else{F 'PowerShell 7 (pwsh) is missing'}
+foreach($c in 'git','oh-my-posh','atuin','fzf','zoxide','chezmoi'){ $x=Get-Command $c -ErrorAction SilentlyContinue;if($x){P "${c}: $($x.Source)"}else{W "$c is missing; related features degrade gracefully"} }
 $theme=Join-Path $HOME '.config\oh-my-posh\terminal.omp.json'; try{Get-Content $theme -Raw|ConvertFrom-Json|Out-Null;P 'Oh My Posh theme parses'}catch{F 'Oh My Posh theme is missing or invalid'}
 $managed=Join-Path $HOME '.config\terminal-env\powershell\profile.ps1'; if(Test-Path $managed){P 'managed PowerShell profile is installed'}else{F 'managed PowerShell profile is missing'}
 $frag=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\terminal-env\terminal-env.json';if(Test-Path $frag){try{Get-Content $frag -Raw|ConvertFrom-Json|Out-Null;P 'Windows Terminal fragment parses'}catch{F 'Windows Terminal fragment is invalid'}}else{W 'Windows Terminal fragment absent'}

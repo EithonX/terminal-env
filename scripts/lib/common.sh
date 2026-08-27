@@ -96,7 +96,7 @@ prune_transaction_backups(){
     (( kept <= keep )) && continue
     rm -rf -- "$dir"
   done < <(for dir in "$root"/install-*; do [[ -d $dir ]] && printf '%s\n' "$dir"; done | sort -r)
-  # Pre-R9 installers stored transaction directories directly under backups/.
+  # Legacy development builds stored transaction directories directly under backups/.
   # Once a new transaction has succeeded, only the original restore point has
   # long-term value; manual backup archives are files and are never touched.
   local legacy_root="$state/backups" legacy

@@ -51,6 +51,11 @@ if ($versionMap.ContainsKey('DEJA_VERSION')) { throw 'Deja must not remain a man
 $updateText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\update.ps1') -Raw
 if ($updateText -match 'install\.ps1') { throw 'terminal-update must not conflate source updates with dependency installation' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1'))) { throw 'PowerShell terminal-deps implementation is missing' }
+$wt = Get-Content -LiteralPath (Join-Path $root 'dot_config\windows-terminal\terminal-env.json') -Raw | ConvertFrom-Json
+$hiddenUpdates = @($wt.profiles | Where-Object { $_.PSObject.Properties.Name -contains 'updates' -and $_.hidden })
+foreach ($guid in '{574e775e-4f2a-5b96-ac1e-a2962a402336}','{5fb123f1-af88-5b5c-8953-d14a8def1978}') {
+    if (-not ($hiddenUpdates | Where-Object updates -eq $guid)) { throw "Windows Terminal generated PowerShell profile is not hidden: $guid" }
+}
 $installText = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
 if ($installText -notmatch 'function\s+Stop-ManagedOhMyPosh') { throw 'Windows installer is missing the managed Oh My Posh lock handler' }
 if ($installText -notmatch 'if\(-not \$DryRun\)\{ Stop-ManagedOhMyPosh \}') { throw 'Windows installer does not stop the managed renderer before dependency replacement' }

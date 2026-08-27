@@ -75,7 +75,7 @@ sync_deps(){
   PROFILE="$profile" bash "$SOURCE/scripts/install-tools-unix.sh"
   [[ $profile == minimal ]] || PROFILE="$profile" SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
 
-  # R7 and earlier managed Deja. Only retire it when the old installer marker
+  # Early development builds managed Deja. Only retire it when the old installer marker
   # proves Terminal Environment activated/imported it. Preserve its DB so a
   # Git rollback can recover without data loss.
   if [[ -f "$STATE/deja-imported" ]]; then

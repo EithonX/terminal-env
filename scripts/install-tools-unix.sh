@@ -11,13 +11,17 @@ LOCAL_BIN="$HOME/.local/bin"; ensure_dir "$LOCAL_BIN"
 install_system_packages(){
   if [[ $OS == linux ]]; then
     have apt-get || die "Linux provisioning currently supports Ubuntu/Debian systems with apt-get."
-    local sudo_cmd=(); [[ $EUID -ne 0 ]] && sudo_cmd=(sudo)
+    local sudo_cmd=()
+    if [[ $EUID -ne 0 ]]; then
+      have sudo || die "sudo is required to install system packages on Ubuntu/Debian. Install prerequisites manually or rerun on a machine with sudo."
+      sudo_cmd=(sudo)
+    fi
     run "${sudo_cmd[@]}" apt-get update
     local required=(zsh git curl ca-certificates gnupg jq unzip xz-utils tar)
     local optional=()
     [[ $PROFILE != minimal ]] && optional+=(ripgrep bat fd-find eza git-delta vivid)
     [[ $PROFILE == server ]] && optional+=(tmux)
-    [[ $PROFILE == workstation ]] && optional+=(shellcheck ghostty)
+    [[ $PROFILE == workstation ]] && optional+=(ghostty)
     if [[ $DRY_RUN == 1 ]]; then
       run "${sudo_cmd[@]}" apt-get install -y "${required[@]}" "${optional[@]}"
       return 0
@@ -34,8 +38,11 @@ install_system_packages(){
     if ! have brew && [[ $DRY_RUN == 0 ]]; then
       die "Homebrew is required for macOS provisioning. Install Homebrew once, then rerun this installer."
     fi
-    local pkgs=(zsh git gnupg jq)
-    [[ $PROFILE != minimal ]] && pkgs+=(ripgrep bat fd eza git-delta shellcheck vivid)
+    # macOS already ships Zsh as its default shell. Avoid replacing it with a
+    # Homebrew Zsh just to run this environment; that also avoids /etc/shells
+    # and login-shell drift on fresh Macs.
+    local pkgs=(git gnupg jq)
+    [[ $PROFILE != minimal ]] && pkgs+=(ripgrep bat fd eza git-delta vivid)
     [[ $PROFILE == server ]] && pkgs+=(tmux)
     run brew install "${pkgs[@]}"
     if [[ $PROFILE == workstation ]]; then run brew install --cask ghostty || warn "Ghostty installation failed; shell setup can still be used in another terminal."; fi

@@ -1,12 +1,24 @@
 {
   "profiles": [
     {
+      "updates": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+      "hidden": true
+    },
+    {
+      "updates": "{5fb123f1-af88-5b5c-8953-d14a8def1978}",
+      "hidden": true
+    },
+    {
       "guid": "{f4fcbca4-728d-4e4d-a520-45a0e623d5ff}",
       "name": "Terminal Environment",
       "commandline": "pwsh.exe -NoLogo",
       "startingDirectory": "%USERPROFILE%",
       "colorScheme": "Terminal Environment",
-      "font": { "face": "MonaspiceNe Nerd Font", "size": 12.0, "weight": "normal" },
+      "font": {
+        "face": "MonaspiceNe Nerd Font",
+        "size": 12.0,
+        "weight": "normal"
+      },
       "antialiasingMode": "cleartype",
       "cursorShape": "bar",
       "historySize": 50000,

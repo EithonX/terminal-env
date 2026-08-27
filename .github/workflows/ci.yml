@@ -1,33 +1,50 @@
 name: ci
+
 on:
   push:
   pull_request:
+
 jobs:
   unix:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            profile: server
+          - os: ubuntu-latest
+            profile: workstation
+          - os: macos-latest
+            profile: workstation
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Install validation tools
         shell: bash
         run: |
-          if [[ "${{ runner.os }}" == Linux ]]; then sudo apt-get update && sudo apt-get install -y zsh shellcheck; else brew install zsh shellcheck; fi
+          if [[ "${{ runner.os }}" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y zsh shellcheck
+          else
+            brew install shellcheck
+          fi
       - name: Source smoke
         shell: bash
         run: bash ./tests/smoke.sh
       - name: Installer dry run
         shell: bash
-        run: bash ./install.sh --dry-run --profile server --no-shell-change --no-font
+        run: bash ./install.sh --dry-run --profile "${{ matrix.profile }}" --no-shell-change
+
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: PowerShell source validation
         shell: pwsh
-        run: ./tests/smoke.ps1
-      - name: Installer dry run
+        run: .\tests\smoke.ps1
+      - name: Workstation installer dry run
         shell: pwsh
-        run: ./install.ps1 -DryRun -Profile workstation -NoFont -NoTerminalConfig
+        run: .\install.ps1 -DryRun -Profile workstation -NoFont -NoTerminalConfig
+      - name: Minimal installer dry run
+        shell: pwsh
+        run: .\install.ps1 -DryRun -Profile minimal -NoFont -NoTerminalConfig

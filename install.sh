@@ -4,6 +4,13 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$ROOT/scripts/lib/common.sh"
 source "$ROOT/versions.env"
 
+# Install dotfiles as the current user. On a real root login (for example a VPS)
+# SUDO_USER is empty; `sudo bash install.sh` is rejected so HOME cannot silently
+# become /root while the caller expected a per-user installation.
+if [[ $EUID -eq 0 && -n ${SUDO_USER:-} && ${SUDO_USER:-root} != root ]]; then
+  die "Do not run Terminal Environment with sudo. Run it as your user; the installer will request sudo only for system packages."
+fi
+
 PROFILE=auto
 LOGIN_USER=${SUDO_USER:-${USER:-$(id -un)}}
 DRY_RUN=0
@@ -161,7 +168,7 @@ EOF2
     [[ -x "$helper" ]] || die "Managed helper was not installed executable: $helper"
   done
 
-  # Clean up the exact malformed target emitted by terminal-env v2 prerelease
+  # Clean up a malformed helper target emitted by early development builds
   # builds, but only when it contains nothing except our four helper files.
   legacy_helper_dir="$HOME/executable_dot_local"
   if [[ -d "$legacy_helper_dir/bin" ]]; then
@@ -180,7 +187,7 @@ EOF2
 
   if [[ $PROFILE != minimal ]]; then PROFILE="$PROFILE" bash "$SOURCE/scripts/build-zsh-plugins.sh"; fi
 
-  # R7 and earlier managed Deja. When upgrading through a full installer run,
+  # Early development builds managed Deja. When upgrading through a full installer run,
   # retire only the binary/daemon proven to have been activated by this project;
   # preserve its local DB so rollback remains lossless.
   if [[ -f "$STATE/deja-imported" ]]; then
