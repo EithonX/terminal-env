@@ -184,7 +184,7 @@ function Install-ManagedFonts {
         }
         if($stale.Count){ Set-Content -LiteralPath (Join-Path $fontState 'stale.txt') -Value $stale -Encoding utf8NoBOM; Warn "$($stale.Count) old managed font file(s) are still locked; cleanup will retry on the next dependency sync." }
         else { Remove-Item -LiteralPath (Join-Path $fontState 'stale.txt') -Force -ErrorAction SilentlyContinue }
-        Info "Monaspice Neon Nerd Font $version: four RIBBI faces registered; temporary archive removed after install."
+        Info "Monaspice Neon Nerd Font ${version}: four RIBBI faces registered; temporary archive removed after install."
     } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
