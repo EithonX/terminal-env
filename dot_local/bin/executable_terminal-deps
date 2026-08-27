@@ -61,13 +61,13 @@ sync_deps(){
   local dry=0
   [[ ${1:-} == --dry-run ]] && dry=1
   if (( dry )); then
-    PROFILE="$profile" DRY_RUN=1 "$SOURCE/scripts/install-tools-unix.sh"
-    [[ $profile == minimal ]] || PROFILE="$profile" DRY_RUN=1 SYNC_PLUGINS=1 "$SOURCE/scripts/build-zsh-plugins.sh"
+    PROFILE="$profile" DRY_RUN=1 bash "$SOURCE/scripts/install-tools-unix.sh"
+    [[ $profile == minimal ]] || PROFILE="$profile" DRY_RUN=1 SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
     return 0
   fi
 
-  PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh"
-  [[ $profile == minimal ]] || PROFILE="$profile" SYNC_PLUGINS=1 "$SOURCE/scripts/build-zsh-plugins.sh"
+  PROFILE="$profile" bash "$SOURCE/scripts/install-tools-unix.sh"
+  [[ $profile == minimal ]] || PROFILE="$profile" SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
 
   # R7 and earlier managed Deja. Only retire it when the old installer marker
   # proves Terminal Environment activated/imported it. Preserve its DB so a

@@ -29,6 +29,6 @@ if have atuin; then atuin search --limit 1 --cmd-only "" >/dev/null 2>&1 && pass
 [[ -n ${COLORTERM:-} ]] && pass "color capability hint: $COLORTERM" || warn 'COLORTERM is unset; truecolor depends on the client terminal'
 [[ -d "$source_tree/.git" ]] && pass 'installed source is Git-backed and updateable' || warn 'installed source is not Git-backed; automatic source update is unavailable'
 [[ -f "$state/deps-pending" ]] && warn 'source update changed dependency pins; run terminal-deps sync' || pass 'dependency manifest is synchronized with the last source apply'
-if (( ! quick )) && [[ -x "$source_tree/tests/smoke.sh" ]]; then "$source_tree/tests/smoke.sh" --source-only >/dev/null 2>&1 && pass 'installed source smoke tests pass' || fail 'installed source smoke tests failed'; fi
+if (( ! quick )) && [[ -r "$source_tree/tests/smoke.sh" ]]; then bash "$source_tree/tests/smoke.sh" --source-only >/dev/null 2>&1 && pass 'installed source smoke tests pass' || fail 'installed source smoke tests failed'; fi
 printf '\nSummary: %d pass, %d warning, %d failure\n' "$ok_n" "$warn_n" "$fail_n"
 (( fail_n == 0 ))

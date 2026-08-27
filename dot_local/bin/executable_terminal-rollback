@@ -11,9 +11,9 @@ profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
 cur_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
 
 git -C "$SOURCE" reset --hard "$prev"
-"$SOURCE/tests/smoke.sh" --source-only
+bash "$SOURCE/tests/smoke.sh" --source-only
 chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
-PROFILE="$profile" SYNC_PLUGINS=0 "$SOURCE/scripts/build-zsh-plugins.sh"
+PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh"
 printf '%s\n' "$cur" > "$STATE/previous-commit"
 new_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
 if [[ $cur_versions != "$new_versions" ]]; then

@@ -117,7 +117,7 @@ if [[ $DRY_RUN == 0 ]]; then
   INSTALL_ACTIVE=1
 fi
 
-"$ROOT/scripts/install-tools-unix.sh"
+bash "$ROOT/scripts/install-tools-unix.sh"
 
 if [[ $DRY_RUN == 0 ]]; then
   OS=$(os_name); ARCH=$(arch_name); TMP=$(mktemp -d)
@@ -173,7 +173,7 @@ EOF2
     mkdir -p "${new_hist%/*}"; cp -p "$old_hist" "$new_hist"; chmod 600 "$new_hist" 2>/dev/null || true
   fi
 
-  if [[ $PROFILE != minimal ]]; then PROFILE="$PROFILE" "$SOURCE/scripts/build-zsh-plugins.sh"; fi
+  if [[ $PROFILE != minimal ]]; then PROFILE="$PROFILE" bash "$SOURCE/scripts/build-zsh-plugins.sh"; fi
 
   # R7 and earlier managed Deja. When upgrading through a full installer run,
   # retire only the binary/daemon proven to have been activated by this project;

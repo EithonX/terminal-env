@@ -5,6 +5,7 @@ on:
 jobs:
   unix:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -14,9 +15,12 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == Linux ]]; then sudo apt-get update && sudo apt-get install -y zsh shellcheck; else brew install zsh shellcheck; fi
-      - run: ./tests/smoke.sh
+      - name: Source smoke
+        shell: bash
+        run: bash ./tests/smoke.sh
       - name: Installer dry run
-        run: ./install.sh --dry-run --profile server --no-shell-change --no-font
+        shell: bash
+        run: bash ./install.sh --dry-run --profile server --no-shell-change --no-font
   windows:
     runs-on: windows-latest
     steps:

@@ -61,15 +61,15 @@ rollback_update() {
   echo 'Source update failed; restoring previous known-good revision/configuration.' >&2
   git -C "$SOURCE" reset --hard "$old" >/dev/null 2>&1 || true
   command -v chezmoi >/dev/null 2>&1 && chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
-  PROFILE="$profile" SYNC_PLUGINS=0 "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
+  PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
   exit "$rc"
 }
 trap rollback_update ERR INT TERM
 
 git -C "$SOURCE" merge --ff-only "$latest"
-"$SOURCE/tests/smoke.sh" --source-only
+bash "$SOURCE/tests/smoke.sh" --source-only
 chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
-PROFILE="$profile" SYNC_PLUGINS=0 "$SOURCE/scripts/build-zsh-plugins.sh"
+PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh"
 terminal-doctor --quick
 printf '%s\n' "$old" > "$STATE/previous-commit"
 new_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)

@@ -36,6 +36,34 @@ function Info([string]$s) { Write-Host "  $s" -ForegroundColor Cyan }
 function Good([string]$s) { Write-Host "  $s" -ForegroundColor Green }
 function Warn([string]$s) { Write-Warning $s }
 function Ensure-Directory([string]$p) { if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $p | Out-Null } }
+function Stop-ManagedOhMyPosh([switch]$Quiet) {
+    # Oh My Posh streaming keeps a persistent renderer process alive on Windows.
+    # Windows locks the running image, so stop only renderer processes executing
+    # our managed binary before replacing or restoring that binary. The existing
+    # shell module restarts its renderer from the same path on the next prompt.
+    $managed = Join-Path $Bin 'oh-my-posh.exe'
+    if (-not (Test-Path -LiteralPath $managed -PathType Leaf)) { return }
+    $managedFull = [IO.Path]::GetFullPath($managed)
+    $matched = 0
+    $failed = @()
+    foreach ($process in @(Get-Process -Name 'oh-my-posh' -ErrorAction SilentlyContinue)) {
+        try {
+            $processPath = $process.Path
+            if (-not $processPath) { continue }
+            $processFull = [IO.Path]::GetFullPath($processPath)
+            if (-not $processFull.Equals($managedFull, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $matched++
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+            try { Wait-Process -Id $process.Id -Timeout 3 -ErrorAction SilentlyContinue } catch {}
+        } catch {
+            $failed += $process.Id
+        }
+    }
+    if ($failed.Count) {
+        throw "Could not stop managed Oh My Posh renderer process(es): $($failed -join ', '). Close Terminal Environment tabs and retry."
+    }
+    if ($matched -and -not $Quiet) { Info "Stopped $matched managed Oh My Posh renderer process(es) for upgrade." }
+}
 function Install-Winget([string]$Id, [switch]$Required) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { if($Required){ throw 'winget is required on Windows 10/11.' }; Warn "winget unavailable; skipped $Id"; return }
     Info "Ensuring $Id"
@@ -87,6 +115,7 @@ function Backup-Path([string]$Path) {
 function Restore-Transaction {
     if(-not $InstallActive -or -not(Test-Path $Backup)){ return }
     Warn 'Installation failed; restoring managed files from the transaction snapshot.'
+    try { Stop-ManagedOhMyPosh -Quiet } catch { Warn $_.Exception.Message }
     $targets=@(
       (Join-Path $HOME '.config\terminal-env'),(Join-Path $HOME '.config\oh-my-posh'),(Join-Path $HOME '.config\atuin'),
       (Join-Path $Bin 'oh-my-posh.exe'),(Join-Path $Bin 'atuin.exe'),(Join-Path $Bin 'fzf.exe'),(Join-Path $Bin 'zoxide.exe'),(Join-Path $Bin 'chezmoi.exe')
@@ -135,6 +164,7 @@ try {
     foreach($pkg in 'eza-community.eza','sharkdp.bat','BurntSushi.ripgrep.MSVC','sharkdp.fd','dandavison.delta') { Install-Winget $pkg }
 
     Ensure-Directory $Bin
+    if(-not $DryRun){ Stop-ManagedOhMyPosh }
     Install-Portable JanDeDobbeleer/oh-my-posh ("v"+$Versions.OH_MY_POSH_VERSION) ("posh-windows-amd64.exe") 'oh-my-posh' 'Oh My Posh'
     Install-Portable atuinsh/atuin ("v"+$Versions.ATUIN_VERSION) 'atuin-x86_64-pc-windows-msvc.zip' 'atuin' 'Atuin'
     Install-Portable junegunn/fzf ("v"+$Versions.FZF_VERSION) ("fzf-"+$Versions.FZF_VERSION+'-windows_amd64.zip') 'fzf' 'fzf'
@@ -221,6 +251,7 @@ try {
     Write-Host 'Open a new Windows Terminal tab using the Terminal Environment profile.'
     $InstallActive = $false
 } catch {
-    Restore-Transaction
-    throw
+    $installError = $_
+    try { Restore-Transaction } catch { Warn "Rollback encountered an additional error: $($_.Exception.Message)" }
+    throw $installError
 }

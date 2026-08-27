@@ -51,5 +51,10 @@ if ($versionMap.ContainsKey('DEJA_VERSION')) { throw 'Deja must not remain a man
 $updateText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\update.ps1') -Raw
 if ($updateText -match 'install\.ps1') { throw 'terminal-update must not conflate source updates with dependency installation' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1'))) { throw 'PowerShell terminal-deps implementation is missing' }
+$installText = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
+if ($installText -notmatch 'function\s+Stop-ManagedOhMyPosh') { throw 'Windows installer is missing the managed Oh My Posh lock handler' }
+if ($installText -notmatch 'if\(-not \$DryRun\)\{ Stop-ManagedOhMyPosh \}') { throw 'Windows installer does not stop the managed renderer before dependency replacement' }
+if ($installText -notmatch 'Restore-Transaction[\s\S]*Stop-ManagedOhMyPosh') { throw 'Windows rollback does not handle the managed renderer lock' }
+if ($installText -notmatch '\$installError\s*=\s*\$_[\s\S]*throw\s+\$installError') { throw 'Windows installer can mask the original error during rollback' }
 
 Write-Host 'smoke: PASS' -ForegroundColor Green

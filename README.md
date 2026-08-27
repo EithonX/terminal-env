@@ -15,7 +15,7 @@ The default prompt is intentionally single-line and transcript-friendly: current
 ## Install
 
 ```sh
-./install.sh
+bash ./install.sh
 ```
 
 ```powershell
@@ -102,8 +102,8 @@ The shared prompt is adaptive rather than identical-looking everywhere: local wo
 Run:
 
 ```sh
-./tests/smoke.sh
-./install.sh --dry-run --profile server --no-shell-change --no-font
+bash ./tests/smoke.sh
+bash ./install.sh --dry-run --profile server --no-shell-change --no-font
 ```
 
 CI parses Unix shell files on Ubuntu/macOS and validates the Windows installer with PowerShell on Windows. The repository intentionally contains no secrets, machine-specific SSH hosts, shell history, GPG material, or user identity configuration. Optional per-machine overrides live in `~/.config/terminal-env/local.zsh` or `local.ps1` and are not managed.
