@@ -44,7 +44,8 @@ export PROFILE DRY_RUN NO_FONT
 STATE="$HOME/.local/state/terminal-env"
 SOURCE="$HOME/.local/share/terminal-env/source"
 CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
-BACKUP="$STATE/backups/install-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+BACKUP="$STATE/backups/transactions/install-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+PREVIOUS_LAST_BACKUP=$(cat "$STATE/last-install-backup" 2>/dev/null || true)
 LOCAL_BIN="$HOME/.local/bin"
 INSTALL_ACTIVE=0
 SAME_SOURCE=0
@@ -94,6 +95,8 @@ rollback_install(){
     rm -rf -- "$target"
   done
   restore_backup_tree "$BACKUP"
+  if [[ -n $PREVIOUS_LAST_BACKUP ]]; then printf '%s\n' "$PREVIOUS_LAST_BACKUP" > "$STATE/last-install-backup"; else rm -f "$STATE/last-install-backup"; fi
+  cleanup_failed_transaction "$BACKUP"
   warn "Managed configuration was restored. System packages installed by the OS package manager were left in place."
   exit "$rc"
 }
@@ -122,9 +125,11 @@ bash "$ROOT/scripts/install-tools-unix.sh"
 if [[ $DRY_RUN == 0 ]]; then
   OS=$(os_name); ARCH=$(arch_name); TMP=$(mktemp -d)
   ASSET="chezmoi_${CHEZMOI_VERSION}_${OS}_${ARCH}.tar.gz"
-  download_release_asset twpayne/chezmoi "v$CHEZMOI_VERSION" "$ASSET" "$TMP/chezmoi.tar.gz"
-  install_archive_binary "$TMP/chezmoi.tar.gz" chezmoi "$LOCAL_BIN/chezmoi"
-  rm -rf "$TMP"
+  (
+    trap 'rm -rf "$TMP"' EXIT
+    download_release_asset twpayne/chezmoi "v$CHEZMOI_VERSION" "$ASSET" "$TMP/chezmoi.tar.gz"
+    install_archive_binary "$TMP/chezmoi.tar.gz" chezmoi "$LOCAL_BIN/chezmoi"
+  )
 
   if [[ $SAME_SOURCE == 0 ]]; then
     if [[ -e $SOURCE && $FORCE != 1 && ! -f $SOURCE/.terminal-env-source ]]; then
@@ -205,6 +210,8 @@ if [[ $DRY_RUN == 0 && $NO_SHELL_CHANGE == 0 && $PROFILE != minimal ]]; then
 fi
 
 if [[ $DRY_RUN == 0 ]]; then
+  : > "$BACKUP/.complete"
+  prune_transaction_backups 3
   INSTALL_ACTIVE=0
   trap - ERR
   [[ -x "$HOME/.local/bin/terminal-doctor" ]] && "$HOME/.local/bin/terminal-doctor" --quick || true

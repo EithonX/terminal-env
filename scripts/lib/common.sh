@@ -63,11 +63,52 @@ atomic_install_file(){
 }
 
 install_archive_binary(){
-  local archive=$1 binary=$2 dest=$3 tmp found
+  local archive=$1 binary=$2 dest=$3 tmp
   tmp=$(mktemp -d)
-  case "$archive" in *.tar.gz|*.tgz) tar -xzf "$archive" -C "$tmp";; *.tar.xz) tar -xJf "$archive" -C "$tmp";; *.zip) unzip -q "$archive" -d "$tmp";; *) rm -rf "$tmp"; die "Unsupported archive: $archive";; esac
-  found=$(find "$tmp" -type f \( -name "$binary" -o -name "$binary.exe" \) -print -quit)
-  [[ -n "$found" ]] || { rm -rf "$tmp"; die "Archive did not contain $binary"; }
-  atomic_install_file "$found" "$dest" 0755
-  rm -rf "$tmp"
+  (
+    trap 'rm -rf "$tmp"' EXIT
+    local found
+    case "$archive" in *.tar.gz|*.tgz) tar -xzf "$archive" -C "$tmp";; *.tar.xz) tar -xJf "$archive" -C "$tmp";; *.zip) unzip -q "$archive" -d "$tmp";; *) die "Unsupported archive: $archive";; esac
+    found=$(find "$tmp" -type f \( -name "$binary" -o -name "$binary.exe" \) -print -quit)
+    [[ -n "$found" ]] || die "Archive did not contain $binary"
+    atomic_install_file "$found" "$dest" 0755
+  )
+}
+
+terminal_state_dir(){ printf '%s\n' "${TERMINAL_ENV_STATE:-$HOME/.local/state/terminal-env}"; }
+transaction_backup_root(){ printf '%s/backups/transactions\n' "$(terminal_state_dir)"; }
+manual_backup_root(){ printf '%s/backups/manual\n' "$(terminal_state_dir)"; }
+path_size_bytes(){
+  local p=$1 kb
+  [[ -e $p ]] || { printf '0\n'; return; }
+  kb=$(du -sk "$p" 2>/dev/null | awk '{print $1}') || kb=0
+  printf '%s\n' "$(( ${kb:-0} * 1024 ))"
+}
+prune_transaction_backups(){
+  local keep=${1:-3} state root original dir kept=0
+  state=$(terminal_state_dir); root=$(transaction_backup_root)
+  [[ -d $root ]] || return 0
+  original=$(cat "$state/original-backup" 2>/dev/null || true)
+  while IFS= read -r dir; do
+    [[ -n $dir && -f "$dir/.complete" ]] || continue
+    if [[ -n $original && $dir == "$original" ]]; then continue; fi
+    kept=$((kept+1))
+    (( kept <= keep )) && continue
+    rm -rf -- "$dir"
+  done < <(for dir in "$root"/install-*; do [[ -d $dir ]] && printf '%s\n' "$dir"; done | sort -r)
+  # Pre-R9 installers stored transaction directories directly under backups/.
+  # Once a new transaction has succeeded, only the original restore point has
+  # long-term value; manual backup archives are files and are never touched.
+  local legacy_root="$state/backups" legacy
+  for legacy in "$legacy_root"/install-* "$legacy_root"/20??????T??????Z*; do
+    [[ -d $legacy ]] || continue
+    [[ -n $original && $legacy == "$original" ]] && continue
+    rm -rf -- "$legacy"
+  done
+}
+cleanup_failed_transaction(){
+  local dir=$1 state original
+  [[ -d $dir ]] || return 0
+  state=$(terminal_state_dir); original=$(cat "$state/original-backup" 2>/dev/null || true)
+  [[ -n $original && $dir == "$original" ]] || rm -rf -- "$dir"
 }

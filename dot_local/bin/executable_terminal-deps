@@ -49,6 +49,12 @@ status_deps(){
   check_plugin_sha 'zsh-completions' zsh-completions "$ZSH_COMPLETIONS_SHA"
   check_plugin_sha 'fzf-tab' fzf-tab "$FZF_TAB_SHA"
   check_plugin_tag 'syntax-highlighting' zsh-syntax-highlighting "$ZSH_SYNTAX_HIGHLIGHTING_REF"
+  if [[ $profile == workstation ]]; then
+    font_version=$(cat "$STATE/fonts/version" 2>/dev/null || true)
+    font_count=$(wc -l < "$STATE/fonts/current" 2>/dev/null || printf 0)
+    if [[ $font_version == "$NERD_FONTS_VERSION" && $font_count -eq 4 ]]; then printf '  OK        %-22s %s (%s faces)\n' 'Monaspice Neon NF' "$font_version" "$font_count"
+    else printf '  MISMATCH  %-22s installed=%s/%s faces  pinned=%s/4 faces\n' 'Monaspice Neon NF' "${font_version:-missing}" "${font_count:-0}" "$NERD_FONTS_VERSION"; bad=1; fi
+  fi
 
   if [[ -f "$STATE/deps-pending" ]]; then
     printf '\n  ACTION    Source changed dependency pins. Run: terminal-deps sync\n'

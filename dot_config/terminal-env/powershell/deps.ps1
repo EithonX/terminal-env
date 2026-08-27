@@ -16,7 +16,9 @@ if($Action -eq 'status'){
         if($cmd){ $v=(& $cmd.Source --version 2>$null | Select-Object -First 1); Write-Host ("  {0,-18} {1}" -f $name,$v) }
         else { Write-Warning "$name is missing" }
     }
-    Write-Host "`nPinned: OMP=$($versions.OH_MY_POSH_VERSION) Atuin=$($versions.ATUIN_VERSION) fzf=$($versions.FZF_VERSION) zoxide=$($versions.ZOXIDE_VERSION) chezmoi=$($versions.CHEZMOI_VERSION)"
+    $fontVersion=if(Test-Path (Join-Path $state 'fonts\version')){(Get-Content -LiteralPath (Join-Path $state 'fonts\version') -Raw).Trim()}else{'missing'}
+    Write-Host "`nPinned: OMP=$($versions.OH_MY_POSH_VERSION) Atuin=$($versions.ATUIN_VERSION) fzf=$($versions.FZF_VERSION) zoxide=$($versions.ZOXIDE_VERSION) chezmoi=$($versions.CHEZMOI_VERSION) font=$($versions.NERD_FONTS_VERSION)"
+    if($fontVersion -ne $versions.NERD_FONTS_VERSION){ Write-Warning "Managed font version is $fontVersion; pinned=$($versions.NERD_FONTS_VERSION)" }
     return
 }
 $profile=if(Test-Path (Join-Path $state 'profile')){(Get-Content -LiteralPath (Join-Path $state 'profile') -Raw).Trim()}else{'workstation'}

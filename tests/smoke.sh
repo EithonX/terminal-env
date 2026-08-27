@@ -78,18 +78,38 @@ update=(r/'dot_local/bin/executable_terminal-update').read_text()
 assert 'install-tools-unix.sh' not in update
 assert 'SYNC_PLUGINS=0' in update
 assert (r/'dot_local/bin/executable_terminal-deps').is_file()
+install_unix=(r/'scripts/install-tools-unix.sh').read_text()
+assert 'Monaspace.tar.xz' in install_unix
+assert 'Monaspace.zip' not in install_unix
+for face in ('Regular','Bold','Italic','BoldItalic'):
+    assert face in install_unix
+installer=(r/'install.sh').read_text()
+assert 'backups/transactions/install-' in installer
+assert 'prune_transaction_backups 3' in installer
+manual=(r/'dot_local/bin/executable_terminal-backup').read_text()
+assert 'backups/manual' in manual
+ps=(r/'install.ps1').read_text()
+assert 'Monaspace.tar.xz' in ps and 'Monaspace.zip' not in ps
+assert 'Prune-TransactionBackups 3' in ps
+for f in ('scripts/lib/common.sh','scripts/install-tools-unix.sh','uninstall.sh','dot_local/bin/executable_terminal-doctor'):
+    assert '-maxdepth' not in (r/f).read_text(), f'{f} uses GNU-only find -maxdepth'
 PY
 # Windows state writes must never rely on Set-Content positional binding.
-python3 - <<'PY2' || bad 'PowerShell Set-Content safety'
+ROOT_FOR_PY="$ROOT" python3 - <<'PY2' || bad 'PowerShell Set-Content safety'
+import os
 from pathlib import Path
-r=Path(r'''$ROOT''')
+r=Path(os.environ['ROOT_FOR_PY'])
 for p in r.rglob('*.ps1'):
+    if 'tests' in p.parts:
+        continue
     for no,line in enumerate(p.read_text(errors='ignore').splitlines(), 1):
-        if 'Set-Content' in line and not line.lstrip().startswith('#'):
-            if '-LiteralPath' not in line and '-Path' not in line:
-                raise SystemExit(f'{p}:{no}: Set-Content path is positional')
-            if '-Value' not in line:
-                raise SystemExit(f'{p}:{no}: Set-Content value is positional')
+        stripped=line.lstrip()
+        if stripped.startswith('#') or 'Set-Content' not in line:
+            continue
+        if '-LiteralPath' not in line and '-Path' not in line:
+            raise SystemExit(f'{p}:{no}: Set-Content path is positional')
+        if '-Value' not in line:
+            raise SystemExit(f'{p}:{no}: Set-Content value is positional')
 PY2
 # Doctor must use a bounded Atuin search; `atuin history list` has no --limit flag.
 if grep -RIn -- 'atuin history list --limit' "$ROOT/dot_local" "$ROOT/dot_config/terminal-env/powershell" >/dev/null 2>&1; then

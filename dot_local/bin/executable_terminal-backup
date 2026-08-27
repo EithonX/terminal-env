@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 with_history=0
 [[ ${1:-} == --with-history ]] && with_history=1
-root="$HOME/.local/state/terminal-env/backups"
+root="$HOME/.local/state/terminal-env/backups/manual"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 out="$root/manual-$stamp.tar.gz"
 mkdir -p "$root"; chmod 700 "$root"

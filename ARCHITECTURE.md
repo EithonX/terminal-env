@@ -31,3 +31,14 @@ Terminal Environment is designed around failure isolation. The operating-system 
 ## Visual system
 
 The default visual language is deliberately restrained: graphite surfaces, cool blue as the primary focus color, violet for references/links, green for executable/success state, amber for attention, and rose for failure. The prompt uses a compact single-line transcript-friendly form that preserves ordinary shell context when output is copied into SSH logs or AI chats. Standard `ls` remains the native command but receives color in interactive shells; `l`, `la`, `ll`, and `lt` use eza for richer icon-aware views.
+
+## Storage ownership
+
+Runtime storage has four ownership classes:
+
+1. **Ephemeral downloads**: OS temp storage only; always removed after provisioning attempts.
+2. **Original restore point**: immutable pre-install state kept until normal uninstall restores it.
+3. **Transaction snapshots**: automatic safety state; newest three successful snapshots retained, failed snapshots removed after successful rollback, with the original restore point excluded from pruning.
+4. **Manual backups**: explicit user artifacts; never auto-pruned.
+
+Fonts follow the same ownership rule. Terminal Environment installs only the Regular/Italic/Bold/Bold-Italic set. New managed font versions use filenames containing `.terminal-env-<version>`; only that namespace is eligible for automatic garbage collection. Existing unversioned fonts may be reused by hash but are not claimed for deletion.

@@ -19,3 +19,9 @@ The first successful migration records an original pre-install restore point. Up
 ## Reporting
 
 Do not include secrets, private SSH configuration, shell history, tokens, or private hostnames when reporting an issue.
+
+## Font and backup ownership
+
+A filename resembling a Terminal Environment dependency is not sufficient proof of ownership. Font garbage collection is restricted to the `.terminal-env-<version>` namespace created by this project; pre-existing font files are never removed automatically. Windows font registration uses current-user scope and does not require elevation.
+
+Transaction pruning occurs only after a successful install has produced a complete replacement snapshot. The original pre-install restore point and explicit `terminal-backup` archives are excluded from automatic pruning. A failed transaction is retained when rollback cannot be proven successful so recovery evidence is not destroyed.

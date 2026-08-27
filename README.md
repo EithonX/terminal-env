@@ -107,3 +107,21 @@ bash ./install.sh --dry-run --profile server --no-shell-change --no-font
 ```
 
 CI parses Unix shell files on Ubuntu/macOS and validates the Windows installer with PowerShell on Windows. The repository intentionally contains no secrets, machine-specific SSH hosts, shell history, GPG material, or user identity configuration. Optional per-machine overrides live in `~/.config/terminal-env/local.zsh` or `local.ps1` and are not managed.
+
+## Storage and lifecycle policy
+
+Terminal Environment owns its temporary downloads and transaction snapshots instead of allowing them to grow without bound.
+
+- Release archives are downloaded into the operating system temp directory and removed in a `finally`/trap path after each provisioning step.
+- Workstation font setup downloads Nerd Fonts' compact `Monaspace.tar.xz` asset and extracts only the four Monaspice Neon RIBBI faces: Regular, Bold, Italic, and Bold Italic. The full font archive is never retained.
+- The original pre-install restore point is preserved until a normal uninstall restores it.
+- Successful automatic transaction backups are stored under `~/.local/state/terminal-env/backups/transactions` and only the newest three are retained in addition to the original restore point.
+- A failed transaction is removed after rollback succeeds, unless that snapshot is the original restore point. If rollback itself has trouble, the snapshot is intentionally preserved for recovery.
+- `terminal-backup` writes user-requested archives under `backups/manual`; manual backups are never automatically deleted.
+- `terminal-doctor` reports retained backup size and managed font footprint so storage growth is visible.
+
+Windows fonts are treated as immutable runtime assets because Windows can lock a registered font while a terminal process is using it. If the desired face is already byte-identical it is reused. A changed managed face is written under a versioned filename instead of overwriting a loaded file; obsolete Terminal Environment-owned versions are garbage-collected when Windows releases their locks. Pre-existing/unversioned fonts are never deleted merely because their names resemble our font.
+
+On Linux, workstation fonts live in the current user's font directory and `fc-cache` is refreshed. On macOS they live in `~/Library/Fonts`, Apple's documented current-user font location. Server profiles do not install fonts because the SSH client renders them.
+
+Native package-manager caches (APT, Homebrew, WinGet) are intentionally not purged by Terminal Environment because they are shared operating-system/package-manager state rather than files owned by this project.

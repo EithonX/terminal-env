@@ -27,7 +27,9 @@ if ($Profile -eq 'auto') { $Profile='workstation' }
 $State = Join-Path $HOME '.local\state\terminal-env'
 $Source = Join-Path $HOME '.local\share\terminal-env\source'
 $Bin = Join-Path $HOME '.local\bin'
-$Backup = Join-Path $State ("backups\" + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+$Transactions = Join-Path $State 'backups\transactions'
+$Backup = Join-Path $Transactions ('install-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+$PreviousLastBackup = if(Test-Path (Join-Path $State 'last-install-backup')){(Get-Content -LiteralPath (Join-Path $State 'last-install-backup') -Raw).Trim()}else{''}
 $Config = Join-Path $HOME '.config\terminal-env\chezmoi.toml'
 $SameSource = ([IO.Path]::GetFullPath($Root).TrimEnd('\') -eq [IO.Path]::GetFullPath($Source).TrimEnd('\'))
 $InstallActive = $false
@@ -36,6 +38,31 @@ function Info([string]$s) { Write-Host "  $s" -ForegroundColor Cyan }
 function Good([string]$s) { Write-Host "  $s" -ForegroundColor Green }
 function Warn([string]$s) { Write-Warning $s }
 function Ensure-Directory([string]$p) { if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $p | Out-Null } }
+function Prune-TransactionBackups([int]$Keep=3) {
+    $root=Join-Path $State 'backups\transactions'
+    if(-not(Test-Path -LiteralPath $root)){ return }
+    $original=if(Test-Path (Join-Path $State 'original-backup')){(Get-Content -LiteralPath (Join-Path $State 'original-backup') -Raw).Trim()}else{''}
+    $kept=0
+    foreach($dir in @(Get-ChildItem -LiteralPath $root -Directory -Filter 'install-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)){
+        if(-not(Test-Path -LiteralPath (Join-Path $dir.FullName '.complete'))){ continue }
+        if($original -and $dir.FullName.Equals($original,[StringComparison]::OrdinalIgnoreCase)){ continue }
+        $kept++
+        if($kept -le $Keep){ continue }
+        Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $legacyRoot=Join-Path $State 'backups'
+    foreach($dir in @(Get-ChildItem -LiteralPath $legacyRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('transactions','manual') -and ($_.Name -like 'install-*' -or $_.Name -match '^20\d{6}T\d{6}Z') })) {
+        if($original -and $dir.FullName.Equals($original,[StringComparison]::OrdinalIgnoreCase)){ continue }
+        Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+function Cleanup-FailedTransaction([string]$Path) {
+    if(-not(Test-Path -LiteralPath $Path)){ return }
+    $original=if(Test-Path (Join-Path $State 'original-backup')){(Get-Content -LiteralPath (Join-Path $State 'original-backup') -Raw).Trim()}else{''}
+    if(-not $original -or -not [IO.Path]::GetFullPath($Path).Equals([IO.Path]::GetFullPath($original),[StringComparison]::OrdinalIgnoreCase)){
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 function Stop-ManagedOhMyPosh([switch]$Quiet) {
     # Oh My Posh streaming keeps a persistent renderer process alive on Windows.
     # Windows locks the running image, so stop only renderer processes executing
@@ -64,6 +91,103 @@ function Stop-ManagedOhMyPosh([switch]$Quiet) {
     }
     if ($matched -and -not $Quiet) { Info "Stopped $matched managed Oh My Posh renderer process(es) for upgrade." }
 }
+function Install-ManagedFonts {
+    if($NoFont -or $Profile -ne 'workstation' -or $DryRun){ return }
+    $tar=Get-Command tar -ErrorAction SilentlyContinue
+    if(-not $tar){ throw 'Windows tar.exe is required to install the compact Nerd Font package.' }
+    $version=$Versions.NERD_FONTS_VERSION
+    $tmp=Join-Path ([IO.Path]::GetTempPath()) ("terminal-font-"+[guid]::NewGuid())
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    try {
+        $archive=Join-Path $tmp 'Monaspace.tar.xz'
+        Get-GitHubAsset ryanoasis/nerd-fonts ("v"+$version) 'Monaspace.tar.xz' $archive
+        $entries=@(& $tar.Source -tf $archive)
+        if($LASTEXITCODE){ throw 'Could not list Monaspace.tar.xz' }
+        $members=@()
+        foreach($style in 'Regular','Bold','Italic','BoldItalic'){
+            $member=$entries | Where-Object { [IO.Path]::GetFileName($_) -eq "MonaspiceNeNerdFont-$style.otf" } | Select-Object -First 1
+            if(-not $member){ $member=$entries | Where-Object { [IO.Path]::GetFileName($_) -eq "MonaspiceNeNerdFont-$style.ttf" } | Select-Object -First 1 }
+            if(-not $member){ throw "Monaspace archive is missing Monaspice Neon $style" }
+            $members += $member
+        }
+        $extract=Join-Path $tmp 'font'; New-Item -ItemType Directory -Path $extract | Out-Null
+        & $tar.Source -xf $archive -C $extract @members
+        if($LASTEXITCODE){ throw 'Could not extract selected Monaspice Neon font faces' }
+
+        $fontDir=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+        New-Item -ItemType Directory -Force $fontDir | Out-Null
+        $fontState=Join-Path $State 'fonts'; New-Item -ItemType Directory -Force $fontState | Out-Null
+        $reg='HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'; New-Item -Path $reg -Force | Out-Null
+        $external=Join-Path $Backup 'external'; New-Item -ItemType Directory -Force $external | Out-Null
+        $regBackup=Join-Path $external 'font-registry.json'
+        $regNames=@{}
+        foreach($style in 'Regular','Bold','Italic','BoldItalic'){
+            $name="Terminal Environment Monaspice Neon $style (TrueType)"
+            try { $regNames[$name]=Get-ItemPropertyValue -LiteralPath $reg -Name $name -ErrorAction Stop } catch { $regNames[$name]=$null }
+        }
+        Set-Content -LiteralPath $regBackup -Value ($regNames | ConvertTo-Json) -Encoding utf8NoBOM
+
+        $safeVersion=($version -replace '[^0-9A-Za-z._-]','_')
+        $records=@(); $newFiles=@()
+        foreach($member in $members){
+            $src=Join-Path $extract $member
+            $leaf=[IO.Path]::GetFileName($member)
+            $style=([IO.Path]::GetFileNameWithoutExtension($leaf) -replace '^MonaspiceNeNerdFont-','')
+            $srcHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $src).Hash
+            $legacy=Join-Path $fontDir $leaf; $dest=$null; $owned=$false
+            if(Test-Path -LiteralPath $legacy -PathType Leaf){
+                try { if((Get-FileHash -Algorithm SHA256 -LiteralPath $legacy).Hash -eq $srcHash){ $dest=$legacy } } catch {}
+            }
+            if(-not $dest){
+                $ext=[IO.Path]::GetExtension($leaf); $base=[IO.Path]::GetFileNameWithoutExtension($leaf)
+                $dest=Join-Path $fontDir "$base.terminal-env-$safeVersion$ext"; $owned=$true
+                if(Test-Path -LiteralPath $dest -PathType Leaf){
+                    $destHash=$null; try{$destHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash}catch{}
+                    if($destHash -ne $srcHash){ $dest=Join-Path $fontDir "$base.terminal-env-$safeVersion-$($srcHash.Substring(0,12).ToLowerInvariant())$ext" }
+                }
+                if(-not(Test-Path -LiteralPath $dest -PathType Leaf)){
+                    Copy-Item -LiteralPath $src -Destination $dest
+                    $newFiles += $dest
+                }
+            }
+            $regName="Terminal Environment Monaspice Neon $style (TrueType)"
+            New-ItemProperty -LiteralPath $reg -Name $regName -Value $dest -PropertyType String -Force | Out-Null
+            $records += [pscustomobject]@{ style=$style; path=$dest; sha256=$srcHash; owned=$owned }
+        }
+        Set-Content -LiteralPath (Join-Path $fontState 'current.json') -Value ($records | ConvertTo-Json -Depth 3) -Encoding utf8NoBOM
+        if($newFiles.Count){ Set-Content -LiteralPath (Join-Path $Backup 'external\font-new-files.txt') -Value $newFiles -Encoding utf8NoBOM }
+        Set-Content -LiteralPath (Join-Path $fontState 'version') -Value $version -NoNewline -Encoding utf8NoBOM
+
+        $current=@($records | ForEach-Object { [IO.Path]::GetFullPath($_.path) })
+        $stale=@()
+        foreach($file in @(Get-ChildItem -LiteralPath $fontDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^MonaspiceNeNerdFont-.*\.terminal-env-.*\.(otf|ttf)$' })){
+            if($current -contains [IO.Path]::GetFullPath($file.FullName)){ continue }
+            try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop } catch { $stale += $file.FullName }
+        }
+        # R7's installer copied every Monaspice Neon variant under the upstream
+        # filename and registered it as '<BaseName> (TrueType)'. That exact
+        # registry/path fingerprint is sufficient to clean its surplus faces
+        # without touching unrelated user fonts. Reused RIBBI files stay put.
+        foreach($file in @(Get-ChildItem -LiteralPath $fontDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^MonaspiceNeNerdFont.*\.(otf|ttf)$' -and $_.Name -notmatch '\.terminal-env-' })){
+            $full=[IO.Path]::GetFullPath($file.FullName)
+            if($current -contains $full){ continue }
+            $legacyReg=$file.BaseName+' (TrueType)'; $legacyValue=$null
+            try { $legacyValue=Get-ItemPropertyValue -LiteralPath $reg -Name $legacyReg -ErrorAction Stop } catch {}
+            if(-not $legacyValue -or -not [IO.Path]::GetFullPath([string]$legacyValue).Equals($full,[StringComparison]::OrdinalIgnoreCase)){ continue }
+            Remove-ItemProperty -LiteralPath $reg -Name $legacyReg -Force -ErrorAction SilentlyContinue
+            try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop } catch { $stale += $file.FullName }
+        }
+        if(Test-Path -LiteralPath (Join-Path $fontState 'stale.txt')){
+            foreach($old in Get-Content -LiteralPath (Join-Path $fontState 'stale.txt')){
+                if($old -and (Test-Path -LiteralPath $old) -and -not($stale -contains $old)){ try{Remove-Item -LiteralPath $old -Force -ErrorAction Stop}catch{$stale += $old} }
+            }
+        }
+        if($stale.Count){ Set-Content -LiteralPath (Join-Path $fontState 'stale.txt') -Value $stale -Encoding utf8NoBOM; Warn "$($stale.Count) old managed font file(s) are still locked; cleanup will retry on the next dependency sync." }
+        else { Remove-Item -LiteralPath (Join-Path $fontState 'stale.txt') -Force -ErrorAction SilentlyContinue }
+        Info "Monaspice Neon Nerd Font $version: four RIBBI faces registered; temporary archive removed after install."
+    } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 function Install-Winget([string]$Id, [switch]$Required) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { if($Required){ throw 'winget is required on Windows 10/11.' }; Warn "winget unavailable; skipped $Id"; return }
     Info "Ensuring $Id"
@@ -117,7 +241,7 @@ function Restore-Transaction {
     Warn 'Installation failed; restoring managed files from the transaction snapshot.'
     try { Stop-ManagedOhMyPosh -Quiet } catch { Warn $_.Exception.Message }
     $targets=@(
-      (Join-Path $HOME '.config\terminal-env'),(Join-Path $HOME '.config\oh-my-posh'),(Join-Path $HOME '.config\atuin'),
+      (Join-Path $HOME '.config\terminal-env'),(Join-Path $HOME '.config\oh-my-posh'),(Join-Path $HOME '.config\atuin'),(Join-Path $State 'fonts'),
       (Join-Path $Bin 'oh-my-posh.exe'),(Join-Path $Bin 'atuin.exe'),(Join-Path $Bin 'fzf.exe'),(Join-Path $Bin 'zoxide.exe'),(Join-Path $Bin 'chezmoi.exe')
     )
     if(-not $SameSource){ $targets += $Source }
@@ -129,6 +253,22 @@ function Restore-Transaction {
     if((Test-Path $wtState)-and(Test-Path $oldwt)){ Copy-Item -Force $oldwt ((Get-Content $wtState -Raw).Trim()) }
     $frag=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\terminal-env'; $oldfrag=Join-Path $Backup 'external\WindowsTerminal-fragment'
     Remove-Item -Recurse -Force $frag -ErrorAction SilentlyContinue; if(Test-Path $oldfrag){ Copy-Item -Recurse -Force $oldfrag $frag }
+    $fontReg=Join-Path $Backup 'external\font-registry.json'
+    $fontKey='HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+    if(Test-Path -LiteralPath $fontReg){
+        $saved=Get-Content -LiteralPath $fontReg -Raw | ConvertFrom-Json
+        foreach($style in 'Regular','Bold','Italic','BoldItalic'){
+            $name="Terminal Environment Monaspice Neon $style (TrueType)"
+            Remove-ItemProperty -LiteralPath $fontKey -Name $name -Force -ErrorAction SilentlyContinue
+            $prop=$saved.PSObject.Properties[$name]
+            if($prop -and $null -ne $prop.Value){ New-ItemProperty -LiteralPath $fontKey -Name $name -Value $prop.Value -PropertyType String -Force | Out-Null }
+        }
+    }
+    $newFonts=Join-Path $Backup 'external\font-new-files.txt'
+    if(Test-Path -LiteralPath $newFonts){ foreach($f in Get-Content -LiteralPath $newFonts){ Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+    if($PreviousLastBackup){ Set-Content -LiteralPath (Join-Path $State 'last-install-backup') -Value $PreviousLastBackup -NoNewline -Encoding utf8NoBOM }
+    else { Remove-Item -LiteralPath (Join-Path $State 'last-install-backup') -Force -ErrorAction SilentlyContinue }
+    Cleanup-FailedTransaction $Backup
 }
 
 try {
@@ -139,6 +279,7 @@ try {
         Backup-Path (Join-Path $HOME '.config\terminal-env')
         Backup-Path (Join-Path $HOME '.config\oh-my-posh')
         Backup-Path (Join-Path $HOME '.config\atuin')
+        Backup-Path (Join-Path $State 'fonts')
         foreach($b in 'oh-my-posh.exe','atuin.exe','fzf.exe','zoxide.exe','chezmoi.exe'){ Backup-Path (Join-Path $Bin $b) }
         if(-not $SameSource){ Backup-Path $Source }
         # r5 briefly used positional Set-Content arguments. On a failed first run it
@@ -190,20 +331,8 @@ try {
         }
     }
 
-    # Install the pinned Monaspice Neon Nerd Font for the current user.
-    if(-not $NoFont -and $Profile -eq 'workstation' -and -not $DryRun){
-        $tmp=Join-Path ([IO.Path]::GetTempPath()) ("terminal-font-"+[guid]::NewGuid()); New-Item -ItemType Directory -Path $tmp | Out-Null
-        try {
-            $zip=Join-Path $tmp 'Monaspace.zip'; Get-GitHubAsset ryanoasis/nerd-fonts ("v"+$Versions.NERD_FONTS_VERSION) 'Monaspace.zip' $zip
-            Expand-Archive -Force $zip (Join-Path $tmp 'x')
-            $fontDir=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'; New-Item -ItemType Directory -Force $fontDir | Out-Null
-            $reg='HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
-            Get-ChildItem (Join-Path $tmp 'x') -Recurse -File | Where-Object { $_.Name -match '^MonaspiceNeNerdFont.*\.(ttf|otf)$' } | ForEach-Object {
-                $dest=Join-Path $fontDir $_.Name; Copy-Item -Force $_.FullName $dest
-                New-ItemProperty -Path $reg -Name ($_.BaseName+' (TrueType)') -Value $dest -PropertyType String -Force | Out-Null
-            }
-        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
-    }
+    # Install only the four RIBBI faces from Nerd Fonts' compact tar.xz asset.
+    Install-ManagedFonts
 
     # Hook PowerShell 7 non-destructively by sourcing the managed profile from the user's existing profile.
     if(-not $DryRun){
@@ -247,8 +376,14 @@ try {
         }
     }
 
-    Good "Installation complete. Backup: $Backup"
-    Write-Host 'Open a new Windows Terminal tab using the Terminal Environment profile.'
+    if($DryRun){
+        Good 'Dry run complete; no files were changed.'
+    } else {
+        New-Item -ItemType File -Force -Path (Join-Path $Backup '.complete') | Out-Null
+        Prune-TransactionBackups 3
+        Good "Installation complete. Transaction backup: $Backup"
+        Write-Host 'Open a new Windows Terminal tab using the Terminal Environment profile.'
+    }
     $InstallActive = $false
 } catch {
     $installError = $_

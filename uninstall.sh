@@ -13,11 +13,22 @@ managed=(
 )
 for rel in "${managed[@]}"; do rm -rf -- "$HOME/$rel"; done
 if [[ -f "$STATE/deja-imported" ]]; then pkill -f 'deja daemon' >/dev/null 2>&1 || true; rm -f -- "$HOME/.local/bin/deja"; fi
+# Remove only versioned font files whose naming proves Terminal Environment owns them.
+font_manifest="$STATE/fonts/current"
+if [[ -r $font_manifest ]]; then
+  while IFS= read -r fp; do
+    case ${fp##*/} in *.terminal-env-*.otf|*.terminal-env-*.ttf) rm -f -- "$fp" ;; esac
+  done < "$font_manifest"
+  if command -v fc-cache >/dev/null 2>&1; then fc-cache -f >/dev/null 2>&1 || true; fi
+fi
 # Source is removed only after its uninstall script has finished reading.
 source_tree="$HOME/.local/share/terminal-env/source"
 if (( restore )) && [[ -n $BACKUP && -d $BACKUP ]]; then
   (cd "$BACKUP" && tar -cf - .) | (cd "$HOME" && tar -xf -)
   echo "Restored original pre-install files from $BACKUP"
+  rm -rf -- "$STATE/backups/transactions"
+  for old_backup in "$STATE/backups"/install-* "$STATE/backups"/20??????T??????Z*; do [[ -d $old_backup ]] && rm -rf -- "$old_backup"; done
+  rm -f -- "$STATE/original-backup" "$STATE/last-install-backup"
 else
   echo 'Managed configuration removed; persistent history and backups were left in place.'
 fi
