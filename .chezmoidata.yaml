@@ -1,0 +1,6 @@
+terminal_env:
+  version: 6
+  theme: obsidian-slate
+  streaming_ms: 100
+  font_family: MonaspiceNe Nerd Font
+  history_size: 200000

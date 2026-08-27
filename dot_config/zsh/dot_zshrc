@@ -1,0 +1,6 @@
+[[ -o interactive ]] || return 0
+
+for _te_file in "$ZDOTDIR"/conf.d/*.zsh(N); do
+  source "$_te_file"
+done
+unset _te_file

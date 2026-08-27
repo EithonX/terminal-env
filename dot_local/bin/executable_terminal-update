@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SOURCE="$HOME/.local/share/terminal-env/source"
+CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
+STATE="$HOME/.local/state/terminal-env"
+profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
+[[ -d "$SOURCE/.git" ]] || { echo 'No Git-backed source tree is installed; update from a fresh release/repository checkout.' >&2; exit 2; }
+[[ -z $(git -C "$SOURCE" status --porcelain) ]] || { echo 'Installed source has local changes; refusing to overwrite them.' >&2; exit 2; }
+old=$(git -C "$SOURCE" rev-parse HEAD)
+rollback_update() {
+  local rc=$?
+  trap - ERR INT TERM
+  echo 'Update failed; restoring previous known-good revision and managed components.' >&2
+  git -C "$SOURCE" reset --hard "$old" >/dev/null 2>&1 || true
+  PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh" >/dev/null 2>&1 || true
+  PROFILE="$profile" "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
+  command -v chezmoi >/dev/null 2>&1 && chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
+  exit "$rc"
+}
+trap rollback_update ERR INT TERM
+git -C "$SOURCE" fetch --prune
+git -C "$SOURCE" pull --ff-only
+"$SOURCE/tests/smoke.sh" --source-only
+PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh"
+PROFILE="$profile" "$SOURCE/scripts/build-zsh-plugins.sh"
+chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
+command -v deja >/dev/null 2>&1 && deja daemon --restart >/dev/null 2>&1 || true
+terminal-doctor --quick
+printf '%s\n' "$old" > "$STATE/previous-commit"
+trap - ERR INT TERM
+echo "Updated successfully. Previous revision: $old"

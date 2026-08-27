@@ -1,0 +1,20 @@
+[theme]
+name = "terminal-env"
+parent = "default"
+
+[colors]
+AlertInfo = "#7dd7ff"
+AlertWarn = "#e5c07b"
+AlertError = "#f38ba8"
+Annotation = "#6c7986"
+Base = "#e7edf3"
+Guidance = "#a7b3bf"
+Important = "#8ab4ff"
+Title = "#c5a6f5"
+Muted = "#6c7986"
+SyntaxCommand = "#8ab4ff"
+SyntaxFlag = "#c5a6f5"
+SyntaxString = "#a6d189"
+SyntaxVariable = "#7dd7ff"
+SyntaxOperator = "#e5c07b"
+SyntaxComment = "#4d5863"

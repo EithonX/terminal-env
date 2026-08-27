@@ -1,0 +1,29 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  unix:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validation tools
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == Linux ]]; then sudo apt-get update && sudo apt-get install -y zsh shellcheck; else brew install zsh shellcheck; fi
+      - run: ./tests/smoke.sh
+      - name: Installer dry run
+        run: ./install.sh --dry-run --profile server --no-shell-change --no-font
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell source validation
+        shell: pwsh
+        run: ./tests/smoke.ps1
+      - name: Installer dry run
+        shell: pwsh
+        run: ./install.ps1 -DryRun -Profile workstation -NoFont -NoTerminalConfig

@@ -1,0 +1,42 @@
+{
+  "profiles": [
+    {
+      "guid": "{f4fcbca4-728d-4e4d-a520-45a0e623d5ff}",
+      "name": "Terminal Environment",
+      "commandline": "pwsh.exe -NoLogo",
+      "startingDirectory": "%USERPROFILE%",
+      "colorScheme": "Terminal Environment",
+      "font": { "face": "MonaspiceNe Nerd Font", "size": 12.0, "weight": "normal" },
+      "antialiasingMode": "cleartype",
+      "cursorShape": "bar",
+      "historySize": 50000,
+      "padding": "14, 11, 14, 11",
+      "scrollbarState": "hidden"
+    }
+  ],
+  "schemes": [
+    {
+      "name": "Terminal Environment",
+      "background": "#090D12",
+      "foreground": "#E7EDF3",
+      "cursorColor": "#7DD7FF",
+      "selectionBackground": "#1F2731",
+      "black": "#090D12",
+      "red": "#F38BA8",
+      "green": "#A6D189",
+      "yellow": "#E5C07B",
+      "blue": "#8AB4FF",
+      "purple": "#C5A6F5",
+      "cyan": "#7DD7FF",
+      "white": "#E7EDF3",
+      "brightBlack": "#6C7986",
+      "brightRed": "#F5A4BC",
+      "brightGreen": "#B7DC9F",
+      "brightYellow": "#EDD29B",
+      "brightBlue": "#A7C5FF",
+      "brightPurple": "#D3BCF7",
+      "brightCyan": "#9DE0FF",
+      "brightWhite": "#F3F7FB"
+    }
+  ]
+}

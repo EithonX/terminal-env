@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+with_history=0
+[[ ${1:-} == --with-history ]] && with_history=1
+root="$HOME/.local/state/terminal-env/backups"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+out="$root/manual-$stamp.tar.gz"
+mkdir -p "$root"; chmod 700 "$root"
+items=()
+for x in .zshenv .config/zsh .config/oh-my-posh .config/atuin .config/ghostty .config/tmux .config/terminal-env; do [[ -e "$HOME/$x" ]] && items+=("$x"); done
+if (( with_history )); then for x in .local/state/zsh .local/share/atuin .local/share/deja; do [[ -e "$HOME/$x" ]] && items+=("$x"); done; fi
+((${#items[@]})) || { echo 'Nothing to back up.'; exit 1; }
+tar -C "$HOME" -czf "$out" "${items[@]}"
+chmod 600 "$out"
+echo "$out"

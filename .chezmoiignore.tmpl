@@ -1,0 +1,24 @@
+README.md
+LICENSE
+install.sh
+install.ps1
+uninstall.sh
+uninstall.ps1
+versions.env
+scripts/**
+tests/**
+.github/**
+.gitignore
+.config/windows-terminal/**
+{{ if eq .chezmoi.os "windows" }}
+.local/bin/terminal-*
+.zshenv
+.config/zsh/**
+.config/ghostty/**
+.config/tmux/**
+{{ else }}
+.config/terminal-env/powershell/**
+{{ if eq .profile "server" }}
+.config/ghostty/**
+{{ end }}
+{{ end }}

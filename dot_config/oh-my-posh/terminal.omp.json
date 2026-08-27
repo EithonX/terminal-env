@@ -1,0 +1,123 @@
+{
+  "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
+  "version": 4,
+  "final_space": true,
+  "streaming": 100,
+  "shell_integration": true,
+  "console_title_template": "{{ .Folder }}{{ if .SSHSession }} · {{ .HostName }}{{ end }}",
+  "palette": {
+    "bg": "#090d12",
+    "surface": "#11161d",
+    "surface2": "#171e27",
+    "text": "#e7edf3",
+    "subtle": "#a7b3bf",
+    "muted": "#6c7986",
+    "dim": "#4d5863",
+    "accent": "#7dd7ff",
+    "blue": "#8ab4ff",
+    "violet": "#c5a6f5",
+    "success": "#a6d189",
+    "warning": "#e5c07b",
+    "danger": "#f38ba8"
+  },
+  "secondary_prompt": {
+    "background": "transparent",
+    "foreground": "p:muted",
+    "template": "↪ ",
+    "multiline_keepprompt": true
+  },
+  "blocks": [
+    {
+      "type": "prompt",
+      "alignment": "left",
+      "segments": [
+        {
+          "type": "session",
+          "style": "plain",
+          "foreground": "p:subtle",
+          "template": "{{ if .SSHSession }}<b>{{ .HostName }}</b> {{ end }}"
+        },
+        {
+          "type": "path",
+          "style": "plain",
+          "foreground": "p:accent",
+          "template": "<b>{{ .Path }}</b>",
+          "options": {
+            "style": "agnoster_short",
+            "max_depth": 4,
+            "folder_separator_icon": "/",
+            "home_icon": "~"
+          }
+        },
+        {
+          "type": "git",
+          "style": "plain",
+          "foreground": "p:violet",
+          "template": " {{ if .HEAD }} <b>{{ .HEAD }}</b>{{ if gt .Working.Modified 0 }} <p:warning>~{{ .Working.Modified }}</>{{ end }}{{ if gt .Staging.Modified 0 }} <p:warning>+~{{ .Staging.Modified }}</>{{ end }}{{ if gt .Working.Untracked 0 }} <p:subtle>?{{ .Working.Untracked }}</>{{ end }}{{ if gt .Working.Deleted 0 }} <p:danger>-{{ .Working.Deleted }}</>{{ end }}{{ if gt .Staging.Deleted 0 }} <p:danger>+-{{ .Staging.Deleted }}</>{{ end }}{{ if gt .Ahead 0 }} <p:accent>↑{{ .Ahead }}</>{{ end }}{{ if gt .Behind 0 }} <p:warning>↓{{ .Behind }}</>{{ end }}{{ if gt .Working.Unmerged 0 }} <p:danger>!{{ .Working.Unmerged }}</>{{ end }}{{ end }}",
+          "timeout": 1000,
+          "options": {
+            "fetch_status": true,
+            "fetch_upstream_icon": false
+          }
+        },
+        {
+          "type": "node",
+          "style": "plain",
+          "foreground": "p:muted",
+          "template": " {{ if .Full }}󰎙 {{ .Full }}{{ end }}",
+          "placeholder": "",
+          "timeout": 500
+        },
+        {
+          "type": "python",
+          "style": "plain",
+          "foreground": "p:muted",
+          "template": " {{ if .Full }} {{ .Full }}{{ if .Venv }} <p:dim>{{ .Venv }}</>{{ end }}{{ end }}",
+          "placeholder": "",
+          "timeout": 500
+        },
+        {
+          "type": "go",
+          "style": "plain",
+          "foreground": "p:muted",
+          "template": " {{ if .Full }} {{ .Full }}{{ end }}",
+          "placeholder": "",
+          "timeout": 500
+        },
+        {
+          "type": "rust",
+          "style": "plain",
+          "foreground": "p:muted",
+          "template": " {{ if .Full }} {{ .Full }}{{ end }}",
+          "placeholder": "",
+          "timeout": 500
+        },
+        {
+          "type": "text",
+          "style": "plain",
+          "foreground": "p:muted",
+          "template": " │ "
+        },
+        {
+          "type": "text",
+          "style": "plain",
+          "foreground": "p:accent",
+          "foreground_templates": [
+            "{{ if .Root }}p:danger{{ end }}"
+          ],
+          "template": "❯"
+        },
+        {
+          "type": "text",
+          "style": "plain",
+          "foreground": "p:text",
+          "template": " "
+        }
+      ]
+    }
+  ],
+  "upgrade": {
+    "notice": false,
+    "auto": false
+  }
+}

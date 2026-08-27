@@ -1,0 +1,27 @@
+# Local-first by default. Explicitly opt into sync later if desired.
+auto_sync = false
+update_check = false
+secrets_filter = true
+workspaces = true
+search_mode = "fuzzy"
+filter_mode = "global"
+style = "auto"
+inline_height = 20
+show_preview = true
+enter_accept = false
+keymap_mode = "emacs"
+
+[theme]
+name = "terminal-env"
+debug = false
+
+[ui]
+columns = [{ type = "directory", width = 24 }, "command"]
+syntax_highlight = true
+
+history_filter = [
+  "(?i)(authorization:.*bearer)",
+  "(?i)(password|passwd|secret|token|api[_-]?key)\\s*=",
+  "(?i)--(password|token|secret|api[_-]?key)(=|\\s)",
+  "(?i)(AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY)"
+]

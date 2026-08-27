@@ -1,0 +1,48 @@
+colors:
+  text: 'e7edf3'
+  subtle: 'a7b3bf'
+  muted: '6c7986'
+  dim: '4d5863'
+  accent: '7dd7ff'
+  blue: '8ab4ff'
+  violet: 'c5a6f5'
+  success: 'a6d189'
+  warning: 'e5c07b'
+  danger: 'f38ba8'
+core:
+  normal_text: { foreground: text }
+  regular_file: { foreground: text }
+  reset_to_normal: {}
+  directory: { foreground: accent, font-style: bold }
+  symlink: { foreground: violet }
+  multi_hard_link: { foreground: violet }
+  fifo: { foreground: warning }
+  socket: { foreground: violet }
+  door: { foreground: violet }
+  block_device: { foreground: warning }
+  character_device: { foreground: warning }
+  broken_symlink: { foreground: danger, font-style: bold }
+  missing_symlink_target: { foreground: danger, font-style: bold }
+  setuid: { foreground: danger, font-style: bold }
+  setgid: { foreground: warning, font-style: bold }
+  file_with_capability: { foreground: warning }
+  sticky_other_writable: { foreground: warning }
+  other_writable: { foreground: warning }
+  sticky: { foreground: warning }
+  executable_file: { foreground: success, font-style: bold }
+text:
+  special: { foreground: warning }
+  todo: { foreground: warning, font-style: bold }
+  licenses: { foreground: muted }
+  configuration: { foreground: subtle }
+  other: { foreground: text }
+markup: { foreground: subtle }
+programming:
+  source: { foreground: subtle }
+tooling: { foreground: subtle }
+continuous-integration: { foreground: subtle }
+media: { foreground: subtle }
+office: { foreground: warning }
+archives: { foreground: warning }
+executable: { foreground: success, font-style: bold }
+unimportant: { foreground: muted }

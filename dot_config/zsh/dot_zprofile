@@ -1,0 +1,2 @@
+# Login-shell configuration. Keep this POSIX/Bash-independent and silent.
+# Universal PATH/XDG state is intentionally handled by ~/.zshenv.

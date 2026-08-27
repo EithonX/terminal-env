@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -u
+quick=0; [[ ${1:-} == --quick ]] && quick=1
+ok_n=0; warn_n=0; fail_n=0
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then G=$'\e[38;5;79m'; Y=$'\e[38;5;214m'; R=$'\e[38;5;203m'; D=$'\e[2m'; X=$'\e[0m'; else G= Y= R= D= X=; fi
+pass(){ printf '%sPASS%s  %s\n' "$G" "$X" "$*"; ok_n=$((ok_n+1)); }
+warn(){ printf '%sWARN%s  %s\n' "$Y" "$X" "$*"; warn_n=$((warn_n+1)); }
+fail(){ printf '%sFAIL%s  %s\n' "$R" "$X" "$*"; fail_n=$((fail_n+1)); }
+have(){ command -v "$1" >/dev/null 2>&1; }
+ver(){ command "$1" "${2:---version}" 2>/dev/null | head -n1; }
+state="$HOME/.local/state/terminal-env"; source_tree="$HOME/.local/share/terminal-env/source"
+profile=$(cat "$state/profile" 2>/dev/null || printf unknown)
+printf 'Terminal Environment doctor\n\n%sprofile=%s shell=%s term=%s%s\n\n' "$D" "$profile" "${SHELL:-unknown}" "${TERM:-unknown}" "$X"
+[[ -r "$state/original-backup" ]] && pass 'original pre-install restore point recorded' || warn 'original restore point is not recorded'
+for c in zsh git oh-my-posh atuin fzf zoxide deja chezmoi; do if have "$c"; then pass "$c: $(ver "$c")"; else warn "$c is missing; related features will degrade gracefully"; fi; done
+[[ $profile == server ]] && { have tmux && pass "tmux: $(tmux -V 2>/dev/null)" || warn 'tmux is missing from server profile'; }
+[[ -r "$HOME/.config/oh-my-posh/terminal.omp.json" ]] && { if have python3 && python3 -m json.tool "$HOME/.config/oh-my-posh/terminal.omp.json" >/dev/null 2>&1; then pass 'Oh My Posh theme JSON parses'; else fail 'Oh My Posh theme JSON is invalid'; fi; } || warn 'Oh My Posh theme is absent'
+for f in "$HOME/.local/share/terminal-env/zsh-plugins/fzf-tab/fzf-tab.plugin.zsh" "$HOME/.local/share/terminal-env/zsh-plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"; do [[ -r $f ]] && pass "plugin present: ${f##*/}" || warn "plugin missing: $f"; done
+[[ -d "$HOME/.local/share/terminal-env/zsh-plugins/zsh-completions/src" ]] && pass 'zsh-completions present' || warn 'zsh-completions missing'
+if have zsh; then
+  bad=0
+  while IFS= read -r -d '' f; do zsh -n "$f" >/dev/null 2>&1 || { fail "Zsh syntax: $f"; bad=1; }; done < <(find "$HOME/.config/zsh" -type f -name '*.zsh' -print0 2>/dev/null)
+  (( bad == 0 )) && pass 'Zsh configuration syntax parses'
+  if (( ! quick )); then insecure=$(zsh -dfc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true); [[ -z $insecure ]] && pass 'Zsh completion paths pass compaudit' || warn "Insecure completion paths: $insecure"; fi
+fi
+if have deja; then [[ -r "$HOME/.local/share/deja/init.zsh" ]] && pass 'Deja cached Zsh integration exists' || warn 'Deja cached integration is absent'; deja ping 2>/dev/null | grep -qi pong && pass 'Deja daemon responds' || warn 'Deja daemon is not responding; it should start on interactive use'; fi
+if have atuin; then atuin search --limit 1 --cmd-only "" >/dev/null 2>&1 && pass 'Atuin local history database is readable' || warn 'Atuin history database check failed'; fi
+[[ ${TERM:-} == dumb ]] && warn 'TERM=dumb: rich UI intentionally degrades' || pass "terminal type: ${TERM:-unknown}"
+[[ -n ${COLORTERM:-} ]] && pass "color capability hint: $COLORTERM" || warn 'COLORTERM is unset; truecolor depends on the client terminal'
+[[ -d "$source_tree/.git" ]] && pass 'installed source is Git-backed and updateable' || warn 'installed source is not Git-backed; automatic source update is unavailable'
+if (( ! quick )) && [[ -x "$source_tree/tests/smoke.sh" ]]; then "$source_tree/tests/smoke.sh" --source-only >/dev/null 2>&1 && pass 'installed source smoke tests pass' || fail 'installed source smoke tests failed'; fi
+printf '\nSummary: %d pass, %d warning, %d failure\n' "$ok_n" "$warn_n" "$fail_n"
+(( fail_n == 0 ))

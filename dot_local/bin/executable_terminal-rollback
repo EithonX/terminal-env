@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SOURCE="$HOME/.local/share/terminal-env/source"
+CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
+STATE="$HOME/.local/state/terminal-env"
+prev=$(cat "$STATE/previous-commit" 2>/dev/null || true)
+[[ -n $prev && -d "$SOURCE/.git" ]] || { echo 'No previous Git revision recorded.' >&2; exit 2; }
+[[ -z $(git -C "$SOURCE" status --porcelain) ]] || { echo 'Installed source has local changes; refusing rollback.' >&2; exit 2; }
+cur=$(git -C "$SOURCE" rev-parse HEAD)
+profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
+git -C "$SOURCE" reset --hard "$prev"
+PROFILE="$profile" "$SOURCE/scripts/install-tools-unix.sh"
+PROFILE="$profile" "$SOURCE/scripts/build-zsh-plugins.sh"
+chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
+command -v deja >/dev/null 2>&1 && deja daemon --restart >/dev/null 2>&1 || true
+printf '%s\n' "$cur" > "$STATE/previous-commit"
+terminal-doctor --quick || true
+echo "Rolled back to $prev"
