@@ -16,9 +16,22 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     if ($DryRun) { Write-Host 'Would install PowerShell 7 and reinvoke the installer.' -ForegroundColor Cyan; exit 0 }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'PowerShell 7 and winget are required.' }
     Write-Host 'Installing PowerShell 7 before continuing...' -ForegroundColor Cyan
-    & winget install --id Microsoft.PowerShell --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    $pwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
-    if (-not (Test-Path $pwsh)) { throw 'PowerShell 7 installed but pwsh.exe was not found.' }
+    & winget install --id Microsoft.PowerShell --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+    if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 installation failed.' }
+    # WinGet defaults to MSIX for PowerShell 7.6+, while older systems may
+    # already use MSI. Resolve either layout instead of assuming Program Files.
+    $pwshCandidates = @()
+    try {
+        $appx = Get-AppxPackage -Name Microsoft.PowerShell -ErrorAction Stop |
+            Sort-Object Version -Descending | Select-Object -First 1
+        if ($appx -and $appx.InstallLocation) {
+            $pwshCandidates += (Join-Path $appx.InstallLocation 'pwsh.exe')
+        }
+    } catch {}
+    $pwshCandidates += (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe')
+    $pwshCandidates += (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
+    $pwsh = $pwshCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -Unique -First 1
+    if (-not $pwsh) { throw 'PowerShell 7 installed but pwsh.exe could not be resolved (MSIX or MSI).' }
     $forward=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Profile',$Profile)
     if($DryRun){$forward+='-DryRun'}; if($NoFont){$forward+='-NoFont'}; if($NoTerminalConfig){$forward+='-NoTerminalConfig'}; if($Force){$forward+='-Force'}
     & $pwsh @forward; exit $LASTEXITCODE

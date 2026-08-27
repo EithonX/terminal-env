@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 set -u
-quick=0; [[ ${1:-} == --quick ]] && quick=1
-ok_n=0; warn_n=0; fail_n=0
-if [[ -t 1 && -z ${NO_COLOR:-} ]]; then G=$'\e[38;5;79m'; Y=$'\e[38;5;214m'; R=$'\e[38;5;203m'; D=$'\e[2m'; X=$'\e[0m'; else G= Y= R= D= X=; fi
+quick=0
+[[ ${1:-} == --quick ]] && quick=1
+ok_n=0
+warn_n=0
+fail_n=0
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+  G=$'\e[38;5;79m'
+  Y=$'\e[38;5;214m'
+  R=$'\e[38;5;203m'
+  D=$'\e[2m'
+  X=$'\e[0m'
+else
+  G='' Y='' R='' D='' X=''
+fi
 pass(){ printf '%sPASS%s  %s\n' "$G" "$X" "$*"; ok_n=$((ok_n+1)); }
 warn(){ printf '%sWARN%s  %s\n' "$Y" "$X" "$*"; warn_n=$((warn_n+1)); }
 fail(){ printf '%sFAIL%s  %s\n' "$R" "$X" "$*"; fail_n=$((fail_n+1)); }
@@ -12,42 +23,172 @@ human_bytes(){
   if (( n >= 1073741824 )); then awk -v n="$n" 'BEGIN{printf "%.1f GiB", n/1073741824}'
   elif (( n >= 1048576 )); then awk -v n="$n" 'BEGIN{printf "%.1f MiB", n/1048576}'
   elif (( n >= 1024 )); then awk -v n="$n" 'BEGIN{printf "%.1f KiB", n/1024}'
-  else printf '%d B' "$n"; fi
+  else printf '%d B' "$n"
+  fi
 }
-dir_bytes(){ local p=$1 k; [[ -e $p ]] || { printf '0'; return; }; k=$(du -sk "$p" 2>/dev/null | awk '{print $1}'); printf '%d' "$(( ${k:-0} * 1024 ))"; }
+dir_bytes(){
+  local p=$1 k
+  if [[ ! -e $p ]]; then printf '0'; return; fi
+  k=$(du -sk "$p" 2>/dev/null | awk '{print $1}')
+  printf '%d' "$(( ${k:-0} * 1024 ))"
+}
 ver(){ command "$1" "${2:---version}" 2>/dev/null | head -n1; }
-state="$HOME/.local/state/terminal-env"; source_tree="$HOME/.local/share/terminal-env/source"
+state="$HOME/.local/state/terminal-env"
+source_tree="$HOME/.local/share/terminal-env/source"
 profile=$(cat "$state/profile" 2>/dev/null || printf unknown)
 printf 'Terminal Environment doctor\n\n%sprofile=%s shell=%s term=%s%s\n\n' "$D" "$profile" "${SHELL:-unknown}" "${TERM:-unknown}" "$X"
-[[ -r "$state/original-backup" ]] && pass 'original pre-install restore point recorded' || warn 'original restore point is not recorded'
+
+if [[ -r "$state/original-backup" ]]; then
+  pass 'original pre-install restore point recorded'
+else
+  warn 'original restore point is not recorded'
+fi
+
 backup_root="$state/backups"
-tx_root="$backup_root/transactions"; manual_root="$backup_root/manual"
-tx_count=0; for x in "$tx_root"/install-*; do [[ -d $x ]] && tx_count=$((tx_count+1)); done
-manual_count=0; for x in "$manual_root"/manual-*; do [[ -f $x ]] && manual_count=$((manual_count+1)); done
+tx_root="$backup_root/transactions"
+manual_root="$backup_root/manual"
+tx_count=0
+for x in "$tx_root"/install-*; do
+  [[ -d $x ]] && tx_count=$((tx_count+1))
+done
+manual_count=0
+for x in "$manual_root"/manual-*; do
+  [[ -f $x ]] && manual_count=$((manual_count+1))
+done
 pass "storage: ${tx_count:-0} retained transaction backup(s), $(human_bytes "$(dir_bytes "$tx_root")")"
 pass "manual backups: ${manual_count:-0}, $(human_bytes "$(dir_bytes "$manual_root")") (never auto-pruned)"
+
 if [[ -r "$state/fonts/current" ]]; then
   font_count=$(wc -l < "$state/fonts/current" | tr -d ' ')
-  font_bytes=0; while IFS= read -r fp; do [[ -f $fp ]] && font_bytes=$((font_bytes + $(wc -c < "$fp"))); done < "$state/fonts/current"
+  font_bytes=0
+  while IFS= read -r fp; do
+    if [[ -f $fp ]]; then
+      font_bytes=$((font_bytes + $(wc -c < "$fp")))
+    fi
+  done < "$state/fonts/current"
   pass "managed font set: ${font_count:-0} face(s), $(human_bytes "$font_bytes")"
 fi
-for c in zsh git oh-my-posh atuin fzf zoxide chezmoi; do if have "$c"; then pass "$c: $(ver "$c")"; else warn "$c is missing; related features will degrade gracefully"; fi; done
-[[ $profile == server ]] && { have tmux && pass "tmux: $(tmux -V 2>/dev/null)" || warn 'tmux is missing from server profile'; }
-[[ -r "$HOME/.config/oh-my-posh/terminal.omp.json" ]] && { if have python3 && python3 -m json.tool "$HOME/.config/oh-my-posh/terminal.omp.json" >/dev/null 2>&1; then pass 'Oh My Posh theme JSON parses'; else fail 'Oh My Posh theme JSON is invalid'; fi; } || warn 'Oh My Posh theme is absent'
-for f in "$HOME/.local/share/terminal-env/zsh-plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" "$HOME/.local/share/terminal-env/zsh-plugins/fzf-tab/fzf-tab.plugin.zsh" "$HOME/.local/share/terminal-env/zsh-plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"; do [[ -r $f ]] && pass "plugin present: ${f##*/}" || warn "plugin missing: $f"; done
-[[ -d "$HOME/.local/share/terminal-env/zsh-plugins/zsh-completions/src" ]] && pass 'zsh-completions present' || warn 'zsh-completions missing'
+
+for c in zsh git oh-my-posh atuin fzf zoxide chezmoi; do
+  if have "$c"; then
+    pass "$c: $(ver "$c")"
+  else
+    warn "$c is missing; related features will degrade gracefully"
+  fi
+done
+
+if [[ $profile == server ]]; then
+  if have tmux; then
+    pass "tmux: $(tmux -V 2>/dev/null)"
+  else
+    warn 'tmux is missing from server profile'
+  fi
+fi
+
+if [[ -r "$HOME/.config/oh-my-posh/terminal.omp.json" ]]; then
+  if have oh-my-posh; then
+    if oh-my-posh print primary --config "$HOME/.config/oh-my-posh/terminal.omp.json" --shell uni >/dev/null 2>&1; then
+      pass 'Oh My Posh theme renders'
+    else
+      fail 'Oh My Posh theme could not be rendered'
+    fi
+  elif have python3; then
+    if python3 -m json.tool "$HOME/.config/oh-my-posh/terminal.omp.json" >/dev/null 2>&1; then
+      pass 'Oh My Posh theme JSON parses'
+    else
+      fail 'Oh My Posh theme JSON is invalid'
+    fi
+  else
+    warn 'Oh My Posh theme is present but no validator is available'
+  fi
+else
+  warn 'Oh My Posh theme is absent'
+fi
+
+for f in \
+  "$HOME/.local/share/terminal-env/zsh-plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+  "$HOME/.local/share/terminal-env/zsh-plugins/fzf-tab/fzf-tab.plugin.zsh" \
+  "$HOME/.local/share/terminal-env/zsh-plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+do
+  if [[ -r $f ]]; then
+    pass "plugin present: ${f##*/}"
+  else
+    warn "plugin missing: $f"
+  fi
+done
+
+if [[ -d "$HOME/.local/share/terminal-env/zsh-plugins/zsh-completions/src" ]]; then
+  pass 'zsh-completions present'
+else
+  warn 'zsh-completions missing'
+fi
+
 if have zsh; then
   bad=0
-  while IFS= read -r -d '' f; do zsh -n "$f" >/dev/null 2>&1 || { fail "Zsh syntax: $f"; bad=1; }; done < <(find "$HOME/.config/zsh" -type f -name '*.zsh' -print0 2>/dev/null)
-  (( bad == 0 )) && pass 'Zsh configuration syntax parses'
-  if (( ! quick )); then insecure=$(zsh -dfc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true); [[ -z $insecure ]] && pass 'Zsh completion paths pass compaudit' || warn "Insecure completion paths: $insecure"; fi
+  while IFS= read -r -d '' f; do
+    if ! zsh -n "$f" >/dev/null 2>&1; then
+      fail "Zsh syntax: $f"
+      bad=1
+    fi
+  done < <(find "$HOME/.config/zsh" -type f -name '*.zsh' -print0 2>/dev/null)
+  if (( bad == 0 )); then pass 'Zsh configuration syntax parses'; fi
+  if (( ! quick )); then
+    insecure=$(zsh -dfc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true)
+    if [[ -z $insecure ]]; then
+      pass 'Zsh completion paths pass compaudit'
+    else
+      warn "Insecure completion paths: $insecure"
+    fi
+  fi
 fi
-if have pgrep && pgrep -f 'deja daemon' >/dev/null 2>&1; then if [[ -f "$state/deja-imported" ]]; then warn 'legacy managed Deja daemon is still running; terminal-deps sync will retire it'; else warn 'a non-managed Deja daemon is running; Terminal Environment will not remove it automatically'; fi; fi
-if have atuin; then atuin search --limit 1 --cmd-only "" >/dev/null 2>&1 && pass 'Atuin local history database is readable' || warn 'Atuin history database check failed'; fi
-[[ ${TERM:-} == dumb ]] && warn 'TERM=dumb: rich UI intentionally degrades' || pass "terminal type: ${TERM:-unknown}"
-[[ -n ${COLORTERM:-} ]] && pass "color capability hint: $COLORTERM" || warn 'COLORTERM is unset; truecolor depends on the client terminal'
-[[ -d "$source_tree/.git" ]] && pass 'installed source is Git-backed and updateable' || warn 'installed source is not Git-backed; automatic source update is unavailable'
-[[ -f "$state/deps-pending" ]] && warn 'source update changed dependency pins; run terminal-deps sync' || pass 'dependency manifest is synchronized with the last source apply'
-if (( ! quick )) && [[ -r "$source_tree/tests/smoke.sh" ]]; then bash "$source_tree/tests/smoke.sh" --source-only >/dev/null 2>&1 && pass 'installed source smoke tests pass' || fail 'installed source smoke tests failed'; fi
+
+if have pgrep && pgrep -f 'deja daemon' >/dev/null 2>&1; then
+  if [[ -f "$state/deja-imported" ]]; then
+    warn 'legacy managed Deja daemon is still running; terminal-deps sync will retire it'
+  else
+    warn 'a non-managed Deja daemon is running; Terminal Environment will not remove it automatically'
+  fi
+fi
+
+if have atuin; then
+  if atuin search --limit 1 --cmd-only "" >/dev/null 2>&1; then
+    pass 'Atuin local history database is readable'
+  else
+    warn 'Atuin history database check failed'
+  fi
+fi
+
+if [[ ${TERM:-} == dumb ]]; then
+  warn 'TERM=dumb: rich UI intentionally degrades'
+else
+  pass "terminal type: ${TERM:-unknown}"
+fi
+
+if [[ -n ${COLORTERM:-} ]]; then
+  pass "color capability hint: $COLORTERM"
+else
+  warn 'COLORTERM is unset; truecolor depends on the client terminal'
+fi
+
+if [[ -d "$source_tree/.git" ]]; then
+  pass 'installed source is Git-backed and updateable'
+else
+  warn 'installed source is not Git-backed; automatic source update is unavailable'
+fi
+
+if [[ -f "$state/deps-pending" ]]; then
+  warn 'source update changed dependency pins; run terminal-deps sync'
+else
+  pass 'dependency manifest is synchronized with the last source apply'
+fi
+
+if (( ! quick )) && [[ -r "$source_tree/tests/smoke.sh" ]]; then
+  if bash "$source_tree/tests/smoke.sh" --source-only >/dev/null 2>&1; then
+    pass 'installed source smoke tests pass'
+  else
+    fail 'installed source smoke tests failed'
+  fi
+fi
+
 printf '\nSummary: %d pass, %d warning, %d failure\n' "$ok_n" "$warn_n" "$fail_n"
 (( fail_n == 0 ))

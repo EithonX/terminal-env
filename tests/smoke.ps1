@@ -63,6 +63,8 @@ if ($installText -notmatch 'Restore-Transaction[\s\S]*Stop-ManagedOhMyPosh') { t
 if ($installText -notmatch '\$installError\s*=\s*\$_[\s\S]*throw\s+\$installError') { throw 'Windows installer can mask the original error during rollback' }
 if ($installText -notmatch 'Monaspace\.tar\.xz' -or $installText -match 'Monaspace\.zip') { throw 'Windows font provisioning must use the compact tar.xz asset' }
 foreach ($face in 'Regular','Bold','Italic','BoldItalic') { if ($installText -notmatch [regex]::Escape($face)) { throw "Windows font provisioning is missing RIBBI face: $face" } }
+if ($installText -notmatch 'Get-AppxPackage -Name Microsoft\.PowerShell') { throw 'PowerShell bootstrap does not support the WinGet MSIX layout' }
+if ($installText -notmatch 'Microsoft\\WindowsApps\\pwsh\.exe') { throw 'PowerShell bootstrap is missing the MSIX app-execution-alias fallback' }
 if ($installText -notmatch 'backups\\transactions') { throw 'Windows transaction backups are not separated from manual backups' }
 if ($installText -notmatch 'Prune-TransactionBackups\s+3') { throw 'Windows transaction retention policy is missing' }
 $backupText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\backup.ps1') -Raw

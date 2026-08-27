@@ -4,8 +4,36 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint shell scripts
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38e # v2.0.0
+        env:
+          SHELLCHECK_OPTS: -x
+        with:
+          version: v0.11.0
+          severity: warning
+          check_together: 'yes'
+          scandir: './scripts'
+          additional_files: >-
+            install.sh
+            uninstall.sh
+            tests/smoke.sh
+            dot_local/bin/executable_terminal-backup
+            dot_local/bin/executable_terminal-deps
+            dot_local/bin/executable_terminal-doctor
+            dot_local/bin/executable_terminal-rollback
+            dot_local/bin/executable_terminal-update
+
   unix:
+    name: ${{ matrix.os }} / ${{ matrix.profile }}
     strategy:
       fail-fast: false
       matrix:
@@ -19,15 +47,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install validation tools
+      - name: Install Linux validation shell
+        if: runner.os == 'Linux'
         shell: bash
         run: |
-          if [[ "${{ runner.os }}" == Linux ]]; then
-            sudo apt-get update
-            sudo apt-get install -y zsh shellcheck
-          else
-            brew install shellcheck
-          fi
+          sudo apt-get update
+          sudo apt-get install -y zsh
       - name: Source smoke
         shell: bash
         run: bash ./tests/smoke.sh
@@ -36,6 +61,7 @@ jobs:
         run: bash ./install.sh --dry-run --profile "${{ matrix.profile }}" --no-shell-change
 
   windows:
+    name: windows / workstation
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

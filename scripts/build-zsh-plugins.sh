@@ -48,11 +48,27 @@ EOF2
 [[ -r "$PLUGIN_ROOT/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && source "$PLUGIN_ROOT/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 EOF2
   for f in fpath interactive final; do mv "$GEN_DIR/$f.zsh.tmp" "$GEN_DIR/$f.zsh"; done
-  command -v fzf >/dev/null 2>&1 && fzf --zsh > "$GEN_DIR/fzf.zsh.tmp" && mv "$GEN_DIR/fzf.zsh.tmp" "$GEN_DIR/fzf.zsh" || true
-  command -v zoxide >/dev/null 2>&1 && zoxide init zsh --cmd z > "$GEN_DIR/zoxide.zsh.tmp" && mv "$GEN_DIR/zoxide.zsh.tmp" "$GEN_DIR/zoxide.zsh" || true
-  command -v atuin >/dev/null 2>&1 && atuin init zsh --disable-up-arrow --disable-ai > "$GEN_DIR/atuin.zsh.tmp" && mv "$GEN_DIR/atuin.zsh.tmp" "$GEN_DIR/atuin.zsh" || true
+  if command -v fzf >/dev/null 2>&1 && fzf --zsh > "$GEN_DIR/fzf.zsh.tmp"; then
+    mv "$GEN_DIR/fzf.zsh.tmp" "$GEN_DIR/fzf.zsh"
+  else
+    rm -f -- "$GEN_DIR/fzf.zsh.tmp"
+  fi
+  if command -v zoxide >/dev/null 2>&1 && zoxide init zsh --cmd z > "$GEN_DIR/zoxide.zsh.tmp"; then
+    mv "$GEN_DIR/zoxide.zsh.tmp" "$GEN_DIR/zoxide.zsh"
+  else
+    rm -f -- "$GEN_DIR/zoxide.zsh.tmp"
+  fi
+  if command -v atuin >/dev/null 2>&1 && atuin init zsh --disable-up-arrow --disable-ai > "$GEN_DIR/atuin.zsh.tmp"; then
+    mv "$GEN_DIR/atuin.zsh.tmp" "$GEN_DIR/atuin.zsh"
+  else
+    rm -f -- "$GEN_DIR/atuin.zsh.tmp"
+  fi
   if command -v vivid >/dev/null 2>&1; then
-    vivid generate terminal-env > "$HOME/.cache/terminal-env/ls-colors.tmp" 2>/dev/null && mv "$HOME/.cache/terminal-env/ls-colors.tmp" "$HOME/.cache/terminal-env/ls-colors" || true
+    if vivid generate terminal-env > "$HOME/.cache/terminal-env/ls-colors.tmp" 2>/dev/null; then
+      mv "$HOME/.cache/terminal-env/ls-colors.tmp" "$HOME/.cache/terminal-env/ls-colors"
+    else
+      rm -f -- "$HOME/.cache/terminal-env/ls-colors.tmp"
+    fi
   fi
 fi
 ok "Zsh integrations prepared."

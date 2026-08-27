@@ -98,6 +98,11 @@ assert 'backups/manual' in manual
 ps=(r/'install.ps1').read_text()
 assert 'Monaspace.tar.xz' in ps and 'Monaspace.zip' not in ps
 assert 'Prune-TransactionBackups 3' in ps
+workflow=(r/'.github/workflows/ci.yml').read_text()
+assert 'ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38e' in workflow
+assert 'version: v0.11.0' in workflow
+assert 'severity: warning' in workflow
+assert 'macos-latest' in workflow and workflow.count('ubuntu-latest') >= 2
 for f in ('scripts/lib/common.sh','scripts/install-tools-unix.sh','uninstall.sh','dot_local/bin/executable_terminal-doctor'):
     assert '-maxdepth' not in (r/f).read_text(), f'{f} uses GNU-only find -maxdepth'
 PY
@@ -139,7 +144,6 @@ if command -v zsh >/dev/null 2>&1; then
     [[ $suggestion == H:* ]] || exit 14
   ' || bad 'context-aware autosuggestion strategy'
 fi
-if command -v shellcheck >/dev/null 2>&1; then shellcheck -x "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/scripts/"*.sh "$ROOT/scripts/lib/"*.sh "$ROOT/dot_local/bin/executable_terminal-"* || fail=1; fi
 (( source_only )) || echo "smoke: $([[ $fail == 0 ]] && echo PASS || echo FAIL)"
 exit "$fail"
 

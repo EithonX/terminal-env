@@ -19,7 +19,7 @@ USAGE
 
 status_deps(){
   if [[ $profile == minimal ]]; then echo 'Minimal profile intentionally omits optional managed dependencies.'; return 0; fi
-  local bad=0 actual expected head tag
+  local bad=0 actual head tag
   printf 'Terminal Environment dependencies\n\n'
   check_tool(){
     local label=$1 cmd=$2 want=$3
@@ -84,7 +84,9 @@ sync_deps(){
     : > "$STATE/deja-retired"
   fi
   rm -f "$STATE/deps-pending"
-  command -v terminal-doctor >/dev/null 2>&1 && terminal-doctor --quick || true
+  if command -v terminal-doctor >/dev/null 2>&1; then
+    terminal-doctor --quick || true
+  fi
   echo 'Dependencies synced to the versions pinned by the installed source.'
   [[ -f "$STATE/deja-retired" && -d "$HOME/.local/share/deja" ]] && echo 'Legacy Deja data was preserved for rollback/recovery.'
 }

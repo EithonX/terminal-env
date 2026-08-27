@@ -4,6 +4,8 @@ Keep changes small, predictable, and portable.
 
 Before opening a pull request:
 
+CI runs ShellCheck 0.11 separately from the platform matrix so lint results are consistent across Ubuntu and macOS.
+
 ```sh
 bash ./tests/smoke.sh
 bash ./install.sh --dry-run --profile server --no-shell-change --no-font

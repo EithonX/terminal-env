@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 
 c_reset='\033[0m'; c_dim='\033[2m'; c_ok='\033[38;5;79m'; c_warn='\033[38;5;214m'; c_err='\033[38;5;203m'; c_info='\033[38;5;80m'
-if [[ ! -t 1 || -n ${NO_COLOR:-} ]]; then c_reset= c_dim= c_ok= c_warn= c_err= c_info=; fi
+if [[ ! -t 1 || -n ${NO_COLOR:-} ]]; then
+  c_reset='' c_dim='' c_ok='' c_warn='' c_err='' c_info=''
+fi
 say(){ printf '%b%s%b\n' "$c_info" "$*" "$c_reset"; }
 ok(){ printf '%b%s%b\n' "$c_ok" "$*" "$c_reset"; }
 warn(){ printf '%b%s%b\n' "$c_warn" "$*" "$c_reset" >&2; }

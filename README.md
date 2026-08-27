@@ -28,6 +28,8 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 
 Requires WinGet. The installer creates a **Terminal Environment** Windows Terminal profile that runs `pwsh.exe` (PowerShell 7).
 
+VS Code renders its integrated terminal separately from Windows Terminal. If prompt icons are missing there, set `terminal.integrated.fontFamily` to `'MonaspiceNe Nerd Font', monospace`.
+
 ### macOS
 
 Homebrew is required once for system packages:

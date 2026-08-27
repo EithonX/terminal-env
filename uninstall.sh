@@ -11,7 +11,9 @@ managed=(
   .local/bin/oh-my-posh .local/bin/atuin .local/bin/fzf .local/bin/zoxide .local/bin/chezmoi
   .local/share/terminal-env/zsh-plugins .cache/terminal-env
 )
-for rel in "${managed[@]}"; do rm -rf -- "$HOME/$rel"; done
+for rel in "${managed[@]}"; do
+  rm -rf -- "${HOME:?}/$rel"
+done
 if [[ -f "$STATE/deja-imported" ]]; then pkill -f 'deja daemon' >/dev/null 2>&1 || true; rm -f -- "$HOME/.local/bin/deja"; fi
 # Remove only versioned font files whose naming proves Terminal Environment owns them.
 font_manifest="$STATE/fonts/current"

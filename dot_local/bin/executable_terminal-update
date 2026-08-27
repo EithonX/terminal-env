@@ -60,7 +60,9 @@ rollback_update() {
   trap - ERR INT TERM
   echo 'Source update failed; restoring previous known-good revision/configuration.' >&2
   git -C "$SOURCE" reset --hard "$old" >/dev/null 2>&1 || true
-  command -v chezmoi >/dev/null 2>&1 && chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
+  if command -v chezmoi >/dev/null 2>&1; then
+    chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
+  fi
   PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
   exit "$rc"
 }

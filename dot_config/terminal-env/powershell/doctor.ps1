@@ -15,6 +15,14 @@ if($pwsh){
     try{$pwshVersion=(& $pwsh.Source -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' | Out-String).Trim()}catch{$pwshVersion='unknown'}
     P "PowerShell: $pwshVersion ($($pwsh.Source))"
 }else{F 'PowerShell 7 (pwsh) is missing'}
+$msixPowerShell=@(Get-AppxPackage -Name Microsoft.PowerShell -ErrorAction SilentlyContinue)
+$msiPowerShell=@(Get-ItemProperty `
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' `
+    -ErrorAction SilentlyContinue | Where-Object DisplayName -Match '^PowerShell 7')
+if($msixPowerShell.Count -and $msiPowerShell.Count){
+    W "both MSI and MSIX PowerShell 7 installations are present; pwsh currently resolves to $($pwsh.Source)"
+}
 foreach($c in 'git','oh-my-posh','atuin','fzf','zoxide','chezmoi'){ $x=Get-Command $c -ErrorAction SilentlyContinue;if($x){P "${c}: $($x.Source)"}else{W "$c is missing; related features degrade gracefully"} }
 $theme=Join-Path $HOME '.config\oh-my-posh\terminal.omp.json'; try{Get-Content $theme -Raw|ConvertFrom-Json|Out-Null;P 'Oh My Posh theme parses'}catch{F 'Oh My Posh theme is missing or invalid'}
 $managed=Join-Path $HOME '.config\terminal-env\powershell\profile.ps1'; if(Test-Path $managed){P 'managed PowerShell profile is installed'}else{F 'managed PowerShell profile is missing'}

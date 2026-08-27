@@ -58,14 +58,24 @@ install_github_tools(){
     local omp_asset atuin_asset fzf_asset zoxide_asset
     if [[ $OS == linux ]]; then
       omp_asset="posh-linux-$ARCH"
-      [[ $ARCH == amd64 ]] && atuin_asset="atuin-x86_64-unknown-linux-gnu.tar.gz" || atuin_asset="atuin-aarch64-unknown-linux-gnu.tar.gz"
+      if [[ $ARCH == amd64 ]]; then
+        atuin_asset="atuin-x86_64-unknown-linux-gnu.tar.gz"
+        zoxide_asset="zoxide-${ZOXIDE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+      else
+        atuin_asset="atuin-aarch64-unknown-linux-gnu.tar.gz"
+        zoxide_asset="zoxide-${ZOXIDE_VERSION}-aarch64-unknown-linux-musl.tar.gz"
+      fi
       fzf_asset="fzf-${FZF_VERSION}-linux_${ARCH}.tar.gz"
-      [[ $ARCH == amd64 ]] && zoxide_asset="zoxide-${ZOXIDE_VERSION}-x86_64-unknown-linux-musl.tar.gz" || zoxide_asset="zoxide-${ZOXIDE_VERSION}-aarch64-unknown-linux-musl.tar.gz"
     else
       omp_asset="posh-darwin-$ARCH"
-      [[ $ARCH == amd64 ]] && atuin_asset="atuin-x86_64-apple-darwin.tar.gz" || atuin_asset="atuin-aarch64-apple-darwin.tar.gz"
+      if [[ $ARCH == amd64 ]]; then
+        atuin_asset="atuin-x86_64-apple-darwin.tar.gz"
+        zoxide_asset="zoxide-${ZOXIDE_VERSION}-x86_64-apple-darwin.tar.gz"
+      else
+        atuin_asset="atuin-aarch64-apple-darwin.tar.gz"
+        zoxide_asset="zoxide-${ZOXIDE_VERSION}-aarch64-apple-darwin.tar.gz"
+      fi
       fzf_asset="fzf-${FZF_VERSION}-darwin_${ARCH}.tar.gz"
-      [[ $ARCH == amd64 ]] && zoxide_asset="zoxide-${ZOXIDE_VERSION}-x86_64-apple-darwin.tar.gz" || zoxide_asset="zoxide-${ZOXIDE_VERSION}-aarch64-apple-darwin.tar.gz"
     fi
 
     download_release_asset JanDeDobbeleer/oh-my-posh "v$OH_MY_POSH_VERSION" "$omp_asset" "$tmp/omp"
@@ -83,7 +93,7 @@ install_font(){
   [[ $PROFILE == workstation && $NO_FONT == 0 ]] || return 0
   if [[ $DRY_RUN == 1 ]]; then say "Would install the four Monaspice Neon Nerd Font RIBBI faces for the current user"; return 0; fi
   local tmp fontdir archive="Monaspace.tar.xz" state manifest list style member src base ext dest hash existing existing_hash
-  local members=() selected=() current=()
+  local members=() current=()
   tmp=$(mktemp -d)
   state="$HOME/.local/state/terminal-env/fonts"
   manifest="$state/current"
@@ -97,7 +107,11 @@ install_font(){
     [[ -n $member ]] || die "Monaspace archive is missing Monaspice Neon $style"
     members+=("$member")
   done
-  [[ $OS == darwin ]] && fontdir="$HOME/Library/Fonts" || fontdir="$HOME/.local/share/fonts"
+  if [[ $OS == darwin ]]; then
+    fontdir="$HOME/Library/Fonts"
+  else
+    fontdir="$HOME/.local/share/fonts"
+  fi
   mkdir -p "$fontdir" "$tmp/font" "$state"
   tar -xf "$tmp/$archive" -C "$tmp/font" "${members[@]}"
   for member in "${members[@]}"; do
@@ -130,7 +144,9 @@ install_font(){
     (( keep )) || rm -f -- "$old"
   done
   shopt -u nullglob
-  [[ $OS == linux ]] && have fc-cache && fc-cache -f "$fontdir" >/dev/null 2>&1 || true
+  if [[ $OS == linux ]] && have fc-cache; then
+    fc-cache -f "$fontdir" >/dev/null 2>&1 || true
+  fi
   )
 }
 

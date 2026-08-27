@@ -207,9 +207,17 @@ if [[ $DRY_RUN == 0 && $NO_SHELL_CHANGE == 0 && $PROFILE != minimal ]]; then
   ZSH_BIN=$(command -v zsh || true)
   if [[ -n $ZSH_BIN && ${SHELL:-} != "$ZSH_BIN" ]]; then
     if (( EUID == 0 )); then
-      chsh -s "$ZSH_BIN" "$LOGIN_USER" 2>/dev/null && ok "Login shell changed to $ZSH_BIN" || warn "Could not change login shell; run: chsh -s $ZSH_BIN $LOGIN_USER"
+      if chsh -s "$ZSH_BIN" "$LOGIN_USER" 2>/dev/null; then
+        ok "Login shell changed to $ZSH_BIN"
+      else
+        warn "Could not change login shell; run: chsh -s $ZSH_BIN $LOGIN_USER"
+      fi
     elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-      sudo chsh -s "$ZSH_BIN" "$LOGIN_USER" && ok "Login shell changed to $ZSH_BIN" || warn "Could not change login shell; run: chsh -s $ZSH_BIN"
+      if sudo chsh -s "$ZSH_BIN" "$LOGIN_USER"; then
+        ok "Login shell changed to $ZSH_BIN"
+      else
+        warn "Could not change login shell; run: chsh -s $ZSH_BIN"
+      fi
     else
       warn "Login shell was not changed non-interactively. Run: chsh -s $ZSH_BIN"
     fi
@@ -221,7 +229,9 @@ if [[ $DRY_RUN == 0 ]]; then
   prune_transaction_backups 3
   INSTALL_ACTIVE=0
   trap - ERR
-  [[ -x "$HOME/.local/bin/terminal-doctor" ]] && "$HOME/.local/bin/terminal-doctor" --quick || true
+  if [[ -x "$HOME/.local/bin/terminal-doctor" ]]; then
+    "$HOME/.local/bin/terminal-doctor" --quick || true
+  fi
   ok "Installation complete. Transaction backup: $BACKUP"
   [[ $PROFILE != minimal ]] && printf 'Open a new terminal or run: exec zsh\n'
 else
