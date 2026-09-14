@@ -28,10 +28,9 @@ if($Action -eq 'status'){
     if($fontVersion -ne $versions.NERD_FONTS_VERSION){ Write-Warning "Managed font version is $fontVersion; pinned=$($versions.NERD_FONTS_VERSION)" }
     return
 }
-$profile=if(Test-Path (Join-Path $state 'profile')){(Get-Content -LiteralPath (Join-Path $state 'profile') -Raw).Trim()}else{'workstation'}
-$args=@('-Profile',$profile,'-Force')
-if($DryRun){$args+='-DryRun'}
-& (Join-Path $source 'install.ps1') @args
-if($LASTEXITCODE){ throw 'Dependency sync failed.' }
+$targetProfile=if(Test-Path (Join-Path $state 'profile')){(Get-Content -LiteralPath (Join-Path $state 'profile') -Raw).Trim()}else{'workstation'}
+$installArgs=@{Profile=$targetProfile;Force=$true}
+if($DryRun){$installArgs.DryRun=$true}
+& (Join-Path $source 'install.ps1') @installArgs
 Remove-Item -LiteralPath (Join-Path $state 'deps-pending') -Force -ErrorAction SilentlyContinue
 Write-Host 'Dependencies synced to the versions pinned by the installed source.' -ForegroundColor Green

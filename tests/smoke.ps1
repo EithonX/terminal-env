@@ -72,6 +72,9 @@ foreach ($pair in @(
     try { & $scriptPath '--terminal-env-invalid-option' *> $null } catch { $rejected = $true }
     if (-not $rejected) { throw "$($pair[1]) accepts unknown options" }
 }
+$depsText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1') -Raw
+if ($depsText -notmatch '\$installArgs\s*=\s*@\{[^}]*Profile\s*=\s*\$targetProfile[^}]*Force\s*=\s*\$true[^}]*\}' -or $depsText -notmatch '@installArgs') { throw 'PowerShell terminal-deps sync must use named parameter splatting' }
+if ($depsText -match "@\('-Profile'" -or $depsText -match '\$LASTEXITCODE[^\r\n]*Dependency sync failed') { throw 'PowerShell terminal-deps sync uses invalid script invocation status handling' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1'))) { throw 'PowerShell terminal-deps implementation is missing' }
 $wt = Get-Content -LiteralPath (Join-Path $root 'dot_config\windows-terminal\terminal-env.json') -Raw | ConvertFrom-Json
 $hiddenUpdates = @($wt.profiles | Where-Object { $_.PSObject.Properties.Name -contains 'updates' -and $_.hidden })
