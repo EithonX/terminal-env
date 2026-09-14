@@ -52,8 +52,8 @@ SSH/headless Linux selects the `server` profile automatically. Desktop Linux sel
 
 | Key | Action |
 |---|---|
-| `→` | Accept the full inline suggestion |
-| `Ctrl+→` | Accept the next suggested word |
+| `←` / `→` | Move the cursor; at end-of-line `→` accepts the full inline suggestion |
+| `Ctrl+←` / `Ctrl+→` | Move by word; at end-of-line `Ctrl+→` accepts the next suggested word |
 | `↑` / `↓` | Prefix-aware shell history |
 | `Ctrl+R` | Atuin history search |
 | `Tab` | Completion through fzf-tab on Zsh |

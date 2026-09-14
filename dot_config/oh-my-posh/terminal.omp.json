@@ -4,7 +4,7 @@
   "final_space": true,
   "streaming": 100,
   "shell_integration": true,
-  "console_title_template": "{{ .Folder }}{{ if .SSHSession }} · {{ .HostName }}{{ end }}",
+  "console_title_template": "{{ .Folder }}{{ if .Root }} · {{ if eq .OS \"windows\" }}admin{{ else }}root{{ end }}{{ end }}{{ if .SSHSession }} · {{ .HostName }}{{ end }}",
   "palette": {
     "bg": "#090d12",
     "surface": "#11161d",
@@ -35,7 +35,7 @@
           "type": "session",
           "style": "plain",
           "foreground": "p:subtle",
-          "template": "{{ if .SSHSession }}<b>{{ .HostName }}</b> {{ end }}"
+          "template": "{{ if .Root }}<p:danger><b>{{ if eq .OS \"windows\" }}ADMIN{{ else }}ROOT{{ end }}</b></> {{ end }}{{ if .SSHSession }}<b>{{ .HostName }}</b> {{ end }}"
         },
         {
           "type": "path",

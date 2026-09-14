@@ -48,6 +48,14 @@ foreach ($line in Get-Content -LiteralPath (Join-Path $root 'versions.env')) {
 }
 if ($versionMap['ZSH_AUTOSUGGESTIONS_REF'] -ne 'v0.7.1') { throw 'zsh-autosuggestions pin is missing' }
 if ($versionMap.ContainsKey('DEJA_VERSION')) { throw 'Deja must not remain a managed default dependency' }
+$profileText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\profile.ps1') -Raw
+if ($profileText -notmatch 'RightArrow\s+-Function\s+ForwardChar') { throw 'RightArrow must preserve cursor movement through ForwardChar' }
+if ($profileText -notmatch 'Ctrl\+RightArrow\s+-Function\s+ForwardWord') { throw 'Ctrl+RightArrow must preserve word movement through ForwardWord' }
+if ($profileText -match 'RightArrow\s+-Function\s+AcceptSuggestion') { throw 'RightArrow must not be prediction-only' }
+if ($profileText -match 'Ctrl\+RightArrow\s+-Function\s+AcceptNextSuggestionWord') { throw 'Ctrl+RightArrow must not be prediction-only' }
+$ompText = Get-Content -LiteralPath (Join-Path $root 'dot_config\oh-my-posh\terminal.omp.json') -Raw
+$omp = $ompText | ConvertFrom-Json
+if ($ompText -notmatch 'ROOT' -or $ompText -notmatch 'ADMIN' -or $omp.console_title_template -notmatch '\.Root') { throw 'Elevated-shell prompt/title indicator is missing' }
 $updateText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\update.ps1') -Raw
 if ($updateText -match 'install\.ps1') { throw 'terminal-update must not conflate source updates with dependency installation' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1'))) { throw 'PowerShell terminal-deps implementation is missing' }

@@ -37,8 +37,8 @@ if (Get-Module -ListAvailable PSReadLine) {
         }
     } catch {}
     try { Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle InlineView } catch { try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle InlineView } catch {} }
-    try { Set-PSReadLineKeyHandler -Key RightArrow -Function AcceptSuggestion } catch {}
-    try { Set-PSReadLineKeyHandler -Chord Ctrl+RightArrow -Function AcceptNextSuggestionWord } catch {}
+    try { Set-PSReadLineKeyHandler -Key RightArrow -Function ForwardChar } catch {}
+    try { Set-PSReadLineKeyHandler -Chord Ctrl+RightArrow -Function ForwardWord } catch {}
     try { Set-PSReadLineKeyHandler -Key UpArrow -Function HistorySearchBackward } catch {}
     try { Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward } catch {}
 }

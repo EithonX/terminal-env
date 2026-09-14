@@ -60,6 +60,8 @@ assert 'transient_prompt' not in t
 blob = json.dumps(t, ensure_ascii=False)
 assert '❯' in blob
 assert '│' in blob
+assert 'ROOT' in blob and 'ADMIN' in blob
+assert 'if .Root' in t.get('console_title_template', '')
 assert '╭─' not in blob
 assert '╰─' not in blob
 # Native ls may gain color but must never be replaced by eza.
@@ -74,6 +76,16 @@ wt=json.loads((r/'dot_config/windows-terminal/terminal-env.json').read_text())
 updates={p.get('updates'):p for p in wt.get('profiles',[]) if isinstance(p,dict) and p.get('updates')}
 assert updates['{574e775e-4f2a-5b96-ac1e-a2962a402336}']['hidden'] is True
 assert updates['{5fb123f1-af88-5b5c-8953-d14a8def1978}']['hidden'] is True
+keys=(r/'dot_config/zsh/conf.d/70-keybindings.zsh').read_text()
+for seq,widget in (("^[[C","forward-char"),("^[OC","forward-char"),("^[[D","backward-char"),("^[OD","backward-char"),("^[[1;5C","forward-word"),("^[[1;5D","backward-word")):
+    assert f"bindkey '{seq}' {widget}" in keys
+prompt=(r/'dot_config/zsh/conf.d/90-prompt.zsh').read_text()
+assert 'EUID == 0' in prompt and 'ROOT' in prompt
+psprofile=(r/'dot_config/terminal-env/powershell/profile.ps1').read_text()
+assert 'RightArrow -Function ForwardChar' in psprofile
+assert 'Ctrl+RightArrow -Function ForwardWord' in psprofile
+assert 'RightArrow -Function AcceptSuggestion' not in psprofile
+assert 'Ctrl+RightArrow -Function AcceptNextSuggestionWord' not in psprofile
 pred=(r/'dot_config/zsh/conf.d/60-prediction.zsh').read_text()
 assert 'ZSH_AUTOSUGGEST_STRATEGY=(terminal_env_autosuggest)' in pred
 assert '_zsh_autosuggest_strategy_completion' in pred
