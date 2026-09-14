@@ -58,6 +58,20 @@ $omp = $ompText | ConvertFrom-Json
 if ($ompText -notmatch 'ROOT' -or $ompText -notmatch 'ADMIN' -or $omp.console_title_template -notmatch '\.Root') { throw 'Elevated-shell prompt/title indicator is missing' }
 $updateText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\update.ps1') -Raw
 if ($updateText -match 'install\.ps1') { throw 'terminal-update must not conflate source updates with dependency installation' }
+foreach ($option in '--check','--remote','--branch') { if ($updateText -notmatch [regex]::Escape($option)) { throw "PowerShell terminal-update does not accept $option" } }
+foreach ($pair in @(
+    @('update.ps1','terminal-update'),
+    @('deps.ps1','terminal-deps'),
+    @('doctor.ps1','terminal-doctor'),
+    @('rollback.ps1','terminal-rollback'),
+    @('backup.ps1','terminal-backup')
+)) {
+    $scriptPath = Join-Path $root ("dot_config\terminal-env\powershell\" + $pair[0])
+    & $scriptPath '--help' *> $null
+    $rejected = $false
+    try { & $scriptPath '--terminal-env-invalid-option' *> $null } catch { $rejected = $true }
+    if (-not $rejected) { throw "$($pair[1]) accepts unknown options" }
+}
 if (-not (Test-Path -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1'))) { throw 'PowerShell terminal-deps implementation is missing' }
 $wt = Get-Content -LiteralPath (Join-Path $root 'dot_config\windows-terminal\terminal-env.json') -Raw | ConvertFrom-Json
 $hiddenUpdates = @($wt.profiles | Where-Object { $_.PSObject.Properties.Name -contains 'updates' -and $_.hidden })

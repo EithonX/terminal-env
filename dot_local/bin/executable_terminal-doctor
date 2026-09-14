@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -u
 quick=0
-[[ ${1:-} == --quick ]] && quick=1
+usage(){ printf '%s\n' 'Usage: terminal-doctor [--quick]'; }
+while (($#)); do
+  case "$1" in
+    --quick) quick=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
 ok_n=0
 warn_n=0
 fail_n=0
@@ -36,9 +43,7 @@ ver(){ command "$1" "${2:---version}" 2>/dev/null | head -n1; }
 state="$HOME/.local/state/terminal-env"
 source_tree="$HOME/.local/share/terminal-env/source"
 profile=$(cat "$state/profile" 2>/dev/null || printf unknown)
-user_name=$(id -un 2>/dev/null || printf unknown)
-if (( EUID == 0 )); then privilege=root; else privilege=user; fi
-printf 'Terminal Environment doctor\n\n%sprofile=%s user=%s privilege=%s shell=%s term=%s%s\n\n' "$D" "$profile" "$user_name" "$privilege" "${SHELL:-unknown}" "${TERM:-unknown}" "$X"
+printf 'Terminal Environment doctor\n\n%sprofile=%s shell=%s term=%s%s\n\n' "$D" "$profile" "${SHELL:-unknown}" "${TERM:-unknown}" "$X"
 
 if [[ -r "$state/original-backup" ]]; then
   pass 'original pre-install restore point recorded'

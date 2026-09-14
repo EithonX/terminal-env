@@ -1,3 +1,9 @@
+$Quick=$false
+foreach($arg in $args){
+    if([string]$arg -in @('--quick','-Quick')){$Quick=$true;continue}
+    if([string]$arg -in @('-h','--help','-?')){Write-Output 'Usage: terminal-doctor [--quick]';return}
+    throw "Unknown option: $arg`nUsage: terminal-doctor [--quick]"
+}
 $pass=0;$warn=0;$fail=0
 function P($s){Write-Host "PASS  $s" -ForegroundColor Green;$script:pass++}; function W($s){Write-Host "WARN  $s" -ForegroundColor Yellow;$script:warn++}; function F($s){Write-Host "FAIL  $s" -ForegroundColor Red;$script:fail++}
 function Size-Bytes([string]$Path){ if(-not(Test-Path -LiteralPath $Path)){return [int64]0}; [int64]$n=0; Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction SilentlyContinue|ForEach-Object{$n+=$_.Length}; return $n }
@@ -41,5 +47,5 @@ $stale=Join-Path $state 'fonts\stale.txt'; if(Test-Path -LiteralPath $stale){$n=
 try{atuin search --limit 1 --cmd-only '' *> $null;if($LASTEXITCODE -eq 0){P 'Atuin history database is readable'}else{W 'Atuin history database check failed'}}catch{W 'Atuin history database check failed'}
 if(Test-Path (Join-Path $source '.git')){P 'installed source is Git-backed and updateable'}else{W 'installed source is not Git-backed'}
 if(Test-Path (Join-Path $state 'deps-pending')){W 'source update changed dependency pins; run terminal-deps sync'}else{P 'dependency manifest is synchronized with the last source apply'}
-if(Test-Path (Join-Path $source 'tests\smoke.ps1')){try{& (Join-Path $source 'tests\smoke.ps1') *> $null;P 'installed source smoke tests pass'}catch{F 'installed source smoke tests failed'}}
+if(-not $Quick -and (Test-Path (Join-Path $source 'tests\smoke.ps1'))){try{& (Join-Path $source 'tests\smoke.ps1') *> $null;P 'installed source smoke tests pass'}catch{F 'installed source smoke tests failed'}}
 Write-Host "`nSummary: $pass pass, $warn warning, $fail failure"; if($fail){exit 1}

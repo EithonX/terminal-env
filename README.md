@@ -73,7 +73,7 @@ terminal-deps status
 terminal-deps sync
 ```
 
-PowerShell uses the same commands with `-Check` instead of `--check`.
+The same long options work on Unix and PowerShell. Native PowerShell forms such as `-Check` remain accepted.
 
 `terminal-update` fast-forwards the installed Git source and applies config only. `terminal-deps sync` reconciles third-party tools to the versions pinned in `versions.env`.
 

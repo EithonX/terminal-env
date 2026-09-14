@@ -1,8 +1,15 @@
-[CmdletBinding()]
-param(
-    [ValidateSet('status','sync')][string]$Action='status',
-    [switch]$DryRun
-)
+$Action='status'
+$DryRun=$false
+$ActionSet=$false
+for($i=0;$i -lt $args.Count;$i++){
+    $arg=[string]$args[$i]
+    if($arg -in @('-h','--help','-?','help')){Write-Output 'Usage: terminal-deps [status|sync] [--dry-run]';return}
+    if($arg -in @('status','sync')){if($ActionSet){throw "Unexpected argument: $arg"};$Action=$arg.ToLowerInvariant();$ActionSet=$true;continue}
+    if($arg -eq '-Action'){if($i+1 -ge $args.Count){throw 'Missing value for -Action.'};$i++;$value=[string]$args[$i];if($value -notin @('status','sync')){throw "Invalid action: $value"};if($ActionSet){throw "Unexpected action: $value"};$Action=$value.ToLowerInvariant();$ActionSet=$true;continue}
+    if($arg -in @('--dry-run','-DryRun')){$DryRun=$true;continue}
+    throw "Unknown option: $arg`nUsage: terminal-deps [status|sync] [--dry-run]"
+}
+if($DryRun -and $Action -ne 'sync'){throw '--dry-run is only valid with sync.'}
 $ErrorActionPreference='Stop'
 $source=Join-Path $HOME '.local\share\terminal-env\source'
 $state=Join-Path $HOME '.local\state\terminal-env'

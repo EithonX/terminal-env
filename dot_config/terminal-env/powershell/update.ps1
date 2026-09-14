@@ -1,9 +1,14 @@
-[CmdletBinding()]
-param(
-    [switch]$Check,
-    [string]$Remote,
-    [string]$Branch
-)
+$Check=$false
+$Remote=$null
+$Branch=$null
+for($i=0;$i -lt $args.Count;$i++){
+    $arg=[string]$args[$i]
+    if($arg -in @('--check','-Check')){$Check=$true;continue}
+    if($arg -in @('--remote','-Remote')){if($i+1 -ge $args.Count){throw "Missing value for $arg."};$i++;$Remote=[string]$args[$i];continue}
+    if($arg -in @('--branch','-Branch')){if($i+1 -ge $args.Count){throw "Missing value for $arg."};$i++;$Branch=[string]$args[$i];continue}
+    if($arg -in @('-h','--help','-?')){Write-Output 'Usage: terminal-update [--check] [--remote NAME] [--branch NAME]';return}
+    throw "Unknown option: $arg`nUsage: terminal-update [--check] [--remote NAME] [--branch NAME]"
+}
 $ErrorActionPreference='Stop'
 $source=Join-Path $HOME '.local\share\terminal-env\source'
 $state=Join-Path $HOME '.local\state\terminal-env'

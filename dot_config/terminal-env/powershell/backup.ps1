@@ -1,4 +1,9 @@
-[CmdletBinding()] param([switch]$WithHistory)
+$WithHistory=$false
+foreach($arg in $args){
+    if([string]$arg -in @('--with-history','-WithHistory')){$WithHistory=$true;continue}
+    if([string]$arg -in @('-h','--help','-?')){Write-Output 'Usage: terminal-backup [--with-history]';return}
+    throw "Unknown option: $arg`nUsage: terminal-backup [--with-history]"
+}
 $ErrorActionPreference='Stop'
 $root=Join-Path $HOME '.local\state\terminal-env\backups\manual'
 New-Item -ItemType Directory -Force $root|Out-Null

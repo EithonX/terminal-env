@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if (($#)); then
+  case "$1" in
+    -h|--help) printf '%s\n' 'Usage: terminal-rollback'; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; printf '%s\n' 'Usage: terminal-rollback' >&2; exit 2 ;;
+  esac
+fi
 SOURCE="$HOME/.local/share/terminal-env/source"
 CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
 STATE="$HOME/.local/state/terminal-env"

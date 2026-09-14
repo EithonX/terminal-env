@@ -1,3 +1,7 @@
+foreach($arg in $args){
+    if([string]$arg -in @('-h','--help','-?')){Write-Output 'Usage: terminal-rollback';return}
+    throw "Unknown option: $arg`nUsage: terminal-rollback"
+}
 $ErrorActionPreference='Stop'
 $source=Join-Path $HOME '.local\share\terminal-env\source'
 $state=Join-Path $HOME '.local\state\terminal-env'

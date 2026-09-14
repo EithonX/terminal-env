@@ -7,6 +7,14 @@ bad(){ echo "FAIL: $*" >&2; fail=1; }
 check(){ "$@" || bad "$*"; }
 check bash -n "$ROOT/install.sh" "$ROOT/uninstall.sh"
 while IFS= read -r -d '' f; do check bash -n "$f"; done < <(find "$ROOT/scripts" "$ROOT/dot_local/bin" -type f -print0)
+cli_home=$(mktemp -d)
+trap 'rm -rf "$cli_home"' EXIT
+mkdir -p "$cli_home/.local/share/terminal-env/source"
+cp "$ROOT/versions.env" "$cli_home/.local/share/terminal-env/source/versions.env"
+for cmd in terminal-backup terminal-deps terminal-doctor terminal-rollback terminal-update; do
+  HOME="$cli_home" bash "$ROOT/dot_local/bin/executable_$cmd" --help >/dev/null 2>&1 || bad "$cmd --help"
+  if HOME="$cli_home" bash "$ROOT/dot_local/bin/executable_$cmd" --terminal-env-invalid-option >/dev/null 2>&1; then bad "$cmd accepts unknown options"; fi
+done
 
 # Regression coverage for helpers that run under `set -u`. Keep dependent
 # assignments out of a single `local` statement: Bash expands the RHS before

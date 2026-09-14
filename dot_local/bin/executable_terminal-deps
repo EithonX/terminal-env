@@ -6,8 +6,9 @@ STATE="$HOME/.local/state/terminal-env"
 # shellcheck disable=SC1091
 source "$SOURCE/versions.env"
 profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
-action=${1:-status}
-shift || true
+action=status
+dry=0
+action_set=0
 
 usage(){ cat <<'USAGE'
 Usage: terminal-deps [status|sync] [--dry-run]
@@ -16,6 +17,18 @@ Usage: terminal-deps [status|sync] [--dry-run]
   sync      Reconcile dependencies to versions.env without updating repo source.
 USAGE
 }
+
+while (($#)); do
+  case "$1" in
+    status|sync)
+      (( action_set == 0 )) || { echo "Unexpected argument: $1" >&2; usage >&2; exit 2; }
+      action=$1; action_set=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+if (( dry )) && [[ $action != sync ]]; then echo '--dry-run is only valid with sync.' >&2; exit 2; fi
 
 status_deps(){
   if [[ $profile == minimal ]]; then echo 'Minimal profile intentionally omits optional managed dependencies.'; return 0; fi
@@ -64,8 +77,6 @@ status_deps(){
 }
 
 sync_deps(){
-  local dry=0
-  [[ ${1:-} == --dry-run ]] && dry=1
   if (( dry )); then
     PROFILE="$profile" DRY_RUN=1 bash "$SOURCE/scripts/install-tools-unix.sh"
     [[ $profile == minimal ]] || PROFILE="$profile" DRY_RUN=1 SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
@@ -93,7 +104,5 @@ sync_deps(){
 
 case "$action" in
   status) status_deps ;;
-  sync) sync_deps "${1:-}" ;;
-  -h|--help|help) usage ;;
-  *) usage >&2; exit 2 ;;
+  sync) sync_deps ;;
 esac
