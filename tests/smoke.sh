@@ -45,7 +45,7 @@ t=json.loads((r/'dot_config/oh-my-posh/terminal.omp.json').read_text())
 assert t.get('streaming') == 100
 assert t.get('shell_integration') is True
 v=(r/'versions.env').read_text()
-assert 'OH_MY_POSH_VERSION=30.7.0' in v
+assert 'OH_MY_POSH_VERSION=31.3.0' in v
 alltext='\n'.join(p.read_text(errors='ignore') for p in r.rglob('*') if p.is_file() and '.git' not in p.parts)
 assert 'ZSH_AUTOSUGGESTIONS_REF=v0.7.1' in v
 assert 'DEJA_VERSION=' not in v
