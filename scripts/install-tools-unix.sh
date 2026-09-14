@@ -78,25 +78,54 @@ install_github_tools(){
       fzf_asset="fzf-${FZF_VERSION}-darwin_${ARCH}.tar.gz"
     fi
 
-    download_release_asset JanDeDobbeleer/oh-my-posh "v$OH_MY_POSH_VERSION" "$omp_asset" "$tmp/omp"
-    atomic_install_file "$tmp/omp" "$LOCAL_BIN/oh-my-posh" 0755
-    download_release_asset atuinsh/atuin "v$ATUIN_VERSION" "$atuin_asset" "$tmp/atuin.tar.gz"
-    install_archive_binary "$tmp/atuin.tar.gz" atuin "$LOCAL_BIN/atuin"
-    download_release_asset junegunn/fzf "v$FZF_VERSION" "$fzf_asset" "$tmp/fzf.tar.gz"
-    install_archive_binary "$tmp/fzf.tar.gz" fzf "$LOCAL_BIN/fzf"
-    download_release_asset ajeetdsouza/zoxide "v$ZOXIDE_VERSION" "$zoxide_asset" "$tmp/zoxide.tar.gz"
-    install_archive_binary "$tmp/zoxide.tar.gz" zoxide "$LOCAL_BIN/zoxide"
+    if [[ -x $LOCAL_BIN/oh-my-posh && $($LOCAL_BIN/oh-my-posh --version 2>/dev/null | head -n1 || true) == *"$OH_MY_POSH_VERSION"* ]]; then
+      say "Oh My Posh $OH_MY_POSH_VERSION already installed"
+    else
+      download_release_asset JanDeDobbeleer/oh-my-posh "v$OH_MY_POSH_VERSION" "$omp_asset" "$tmp/omp"
+      atomic_install_file "$tmp/omp" "$LOCAL_BIN/oh-my-posh" 0755
+    fi
+    if [[ -x $LOCAL_BIN/atuin && $($LOCAL_BIN/atuin --version 2>/dev/null | head -n1 || true) == *"$ATUIN_VERSION"* ]]; then
+      say "Atuin $ATUIN_VERSION already installed"
+    else
+      download_release_asset atuinsh/atuin "v$ATUIN_VERSION" "$atuin_asset" "$tmp/atuin.tar.gz"
+      install_archive_binary "$tmp/atuin.tar.gz" atuin "$LOCAL_BIN/atuin"
+    fi
+    if [[ -x $LOCAL_BIN/fzf && $($LOCAL_BIN/fzf --version 2>/dev/null | head -n1 || true) == *"$FZF_VERSION"* ]]; then
+      say "fzf $FZF_VERSION already installed"
+    else
+      download_release_asset junegunn/fzf "v$FZF_VERSION" "$fzf_asset" "$tmp/fzf.tar.gz"
+      install_archive_binary "$tmp/fzf.tar.gz" fzf "$LOCAL_BIN/fzf"
+    fi
+    if [[ -x $LOCAL_BIN/zoxide && $($LOCAL_BIN/zoxide --version 2>/dev/null | head -n1 || true) == *"$ZOXIDE_VERSION"* ]]; then
+      say "zoxide $ZOXIDE_VERSION already installed"
+    else
+      download_release_asset ajeetdsouza/zoxide "v$ZOXIDE_VERSION" "$zoxide_asset" "$tmp/zoxide.tar.gz"
+      install_archive_binary "$tmp/zoxide.tar.gz" zoxide "$LOCAL_BIN/zoxide"
+    fi
   )
 }
 
 install_font(){
   [[ $PROFILE == workstation && $NO_FONT == 0 ]] || return 0
-  if [[ $DRY_RUN == 1 ]]; then say "Would install the four Monaspice Neon Nerd Font RIBBI faces for the current user"; return 0; fi
-  local tmp fontdir archive="Monaspace.tar.xz" state manifest list style member src base ext dest hash existing existing_hash
+  local tmp fontdir archive="Monaspace.tar.xz" state manifest list style member src base ext dest hash existing existing_hash installed_version count missing path
   local members=() current=()
-  tmp=$(mktemp -d)
   state="$HOME/.local/state/terminal-env/fonts"
   manifest="$state/current"
+  installed_version=$(cat "$state/version" 2>/dev/null || true)
+  count=0; missing=0
+  if [[ $installed_version == "$NERD_FONTS_VERSION" && -r $manifest ]]; then
+    while IFS= read -r path; do
+      [[ -n $path ]] || continue
+      count=$((count+1))
+      [[ -f $path ]] || missing=1
+    done < "$manifest"
+  fi
+  if [[ $installed_version == "$NERD_FONTS_VERSION" && $count -eq 4 && $missing -eq 0 ]]; then
+    say "Monaspice Neon Nerd Font $NERD_FONTS_VERSION already installed"
+    return 0
+  fi
+  if [[ $DRY_RUN == 1 ]]; then say "Would install the four Monaspice Neon Nerd Font RIBBI faces for the current user"; return 0; fi
+  tmp=$(mktemp -d)
   (
     trap 'rm -rf "$tmp"' EXIT
   download_release_asset ryanoasis/nerd-fonts "v$NERD_FONTS_VERSION" "$archive" "$tmp/$archive"

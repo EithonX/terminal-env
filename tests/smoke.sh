@@ -94,6 +94,12 @@ assert 'RightArrow -Function ForwardChar' in psprofile
 assert 'Ctrl+RightArrow -Function ForwardWord' in psprofile
 assert 'RightArrow -Function AcceptSuggestion' not in psprofile
 assert 'Ctrl+RightArrow -Function AcceptNextSuggestionWord' not in psprofile
+unix_tools=(r/'scripts/install-tools-unix.sh').read_text()
+assert 'already installed' in unix_tools
+assert 'installed_version=' in unix_tools
+win_install=(r/'install.ps1').read_text()
+assert 'GITHUB_TOKEN' in win_install and 'GH_TOKEN' in win_install
+assert 'already installed' in win_install
 pred=(r/'dot_config/zsh/conf.d/60-prediction.zsh').read_text()
 assert 'ZSH_AUTOSUGGEST_STRATEGY=(terminal_env_autosuggest)' in pred
 assert '_zsh_autosuggest_strategy_completion' in pred

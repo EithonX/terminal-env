@@ -83,7 +83,9 @@ foreach ($guid in '{574e775e-4f2a-5b96-ac1e-a2962a402336}','{5fb123f1-af88-5b5c-
 }
 $installText = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
 if ($installText -notmatch 'function\s+Stop-ManagedOhMyPosh') { throw 'Windows installer is missing the managed Oh My Posh lock handler' }
-if ($installText -notmatch 'if\(-not \$DryRun\)\{ Stop-ManagedOhMyPosh \}') { throw 'Windows installer does not stop the managed renderer before dependency replacement' }
+if ($installText -notmatch '\$env:GITHUB_TOKEN' -or $installText -notmatch '\$env:GH_TOKEN') { throw 'Windows GitHub release lookup does not support authenticated API requests' }
+if ($installText -notmatch 'already installed' -or $installText -notmatch 'ConvertFrom-Json') { throw 'Windows dependency provisioning is not idempotent' }
+if ($installText -notmatch "if\(\$Binary -eq 'oh-my-posh'\)\{ Stop-ManagedOhMyPosh \}") { throw 'Windows installer does not stop the managed renderer before dependency replacement' }
 if ($installText -notmatch 'Restore-Transaction[\s\S]*Stop-ManagedOhMyPosh') { throw 'Windows rollback does not handle the managed renderer lock' }
 if ($installText -notmatch '\$installError\s*=\s*\$_[\s\S]*throw\s+\$installError') { throw 'Windows installer can mask the original error during rollback' }
 if ($installText -notmatch 'Monaspace\.tar\.xz' -or $installText -match 'Monaspace\.zip') { throw 'Windows font provisioning must use the compact tar.xz asset' }

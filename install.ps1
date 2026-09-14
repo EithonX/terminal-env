@@ -105,10 +105,22 @@ function Stop-ManagedOhMyPosh([switch]$Quiet) {
     if ($matched -and -not $Quiet) { Info "Stopped $matched managed Oh My Posh renderer process(es) for upgrade." }
 }
 function Install-ManagedFonts {
-    if($NoFont -or $Profile -ne 'workstation' -or $DryRun){ return }
+    if($NoFont -or $Profile -ne 'workstation'){ return }
+    $version=$Versions.NERD_FONTS_VERSION
+    $fontState=Join-Path $State 'fonts'
+    $fontVersion=Join-Path $fontState 'version'
+    $fontManifest=Join-Path $fontState 'current.json'
+    if((Test-Path -LiteralPath $fontVersion -PathType Leaf) -and (Test-Path -LiteralPath $fontManifest -PathType Leaf)){
+        try {
+            $installedVersion=(Get-Content -LiteralPath $fontVersion -Raw).Trim()
+            $records=@(Get-Content -LiteralPath $fontManifest -Raw | ConvertFrom-Json)
+            $missing=@($records | Where-Object { -not $_.path -or -not(Test-Path -LiteralPath $_.path -PathType Leaf) })
+            if($installedVersion -eq $version -and $records.Count -eq 4 -and $missing.Count -eq 0){ Info "Monaspice Neon Nerd Font $version already installed"; return }
+        } catch {}
+    }
+    if($DryRun){ Info "Would install Monaspice Neon Nerd Font $version"; return }
     $tar=Get-Command tar -ErrorAction SilentlyContinue
     if(-not $tar){ throw 'Windows tar.exe is required to install the compact Nerd Font package.' }
-    $version=$Versions.NERD_FONTS_VERSION
     $tmp=Join-Path ([IO.Path]::GetTempPath()) ("terminal-font-"+[guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
@@ -129,7 +141,7 @@ function Install-ManagedFonts {
 
         $fontDir=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
         New-Item -ItemType Directory -Force $fontDir | Out-Null
-        $fontState=Join-Path $State 'fonts'; New-Item -ItemType Directory -Force $fontState | Out-Null
+        New-Item -ItemType Directory -Force $fontState | Out-Null
         $reg='HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'; New-Item -Path $reg -Force | Out-Null
         $external=Join-Path $Backup 'external'; New-Item -ItemType Directory -Force $external | Out-Null
         $regBackup=Join-Path $external 'font-registry.json'
@@ -212,7 +224,15 @@ function Install-Winget([string]$Id, [switch]$Required) {
 }
 function Get-GitHubAsset([string]$Repo,[string]$Tag,[string]$Name,[string]$Out) {
     $headers=@{ 'User-Agent'='terminal-env-installer'; 'Accept'='application/vnd.github+json' }
-    $release=Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+    $token=if($env:GITHUB_TOKEN){$env:GITHUB_TOKEN}elseif($env:GH_TOKEN){$env:GH_TOKEN}else{$null}
+    if($token){$headers.Authorization="Bearer $token"}
+    try { $release=Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag" }
+    catch {
+        $status=$null
+        try { $status=[int]$_.Exception.Response.StatusCode } catch {}
+        if($status -eq 403){ throw "GitHub API rejected $Repo $Tag with HTTP 403. Set GITHUB_TOKEN or GH_TOKEN and retry if the API rate limit was reached." }
+        throw
+    }
     $asset=$release.assets | Where-Object name -eq $Name | Select-Object -First 1
     if(-not $asset){ throw "Asset $Name not found for $Repo $Tag" }
     Info "Downloading $Name"
@@ -222,18 +242,26 @@ function Get-GitHubAsset([string]$Repo,[string]$Tag,[string]$Name,[string]$Out) 
         if($actual -ne $asset.digest.Substring(7).ToLowerInvariant()){ throw "SHA-256 mismatch: $Name" }
     } else { Warn "GitHub did not expose an asset digest for $Name" }
 }
-function Install-Portable([string]$Repo,[string]$Tag,[string]$Asset,[string]$Binary,[string]$Name) {
+function Install-Portable([string]$Repo,[string]$Tag,[string]$Asset,[string]$Binary,[string]$Name,[string]$Version) {
+    $dest=Join-Path $Bin "$Binary.exe"
+    if(Test-Path -LiteralPath $dest -PathType Leaf){
+        try {
+            $actual=(& $dest --version 2>$null | Select-Object -First 1)
+            if($LASTEXITCODE -eq 0 -and $actual -match ("(?<![0-9])v?"+[regex]::Escape($Version)+"(?![0-9])")){ Info "$Name $Version already installed"; return }
+        } catch {}
+    }
     if($DryRun){ Info "Would install $Name $Tag"; return }
+    if($Binary -eq 'oh-my-posh'){ Stop-ManagedOhMyPosh }
     $tmp=Join-Path ([IO.Path]::GetTempPath()) ("terminal-env-"+[guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
         $archive=Join-Path $tmp $Asset; Get-GitHubAsset $Repo $Tag $Asset $archive
-        if($Asset.EndsWith('.exe')){ $dest=Join-Path $Bin "$Binary.exe"; $stage="$dest.new.$PID"; Copy-Item -Force $archive $stage; Move-Item -Force $stage $dest; return }
+        if($Asset.EndsWith('.exe')){ $stage="$dest.new.$PID"; Copy-Item -Force $archive $stage; Move-Item -Force $stage $dest; return }
         if($Asset.EndsWith('.zip')){ Expand-Archive -Force $archive (Join-Path $tmp 'x') }
         else { tar -xf $archive -C $tmp }
         $found=Get-ChildItem $tmp -Recurse -File | Where-Object { $_.Name -eq $Binary -or $_.Name -eq "$Binary.exe" } | Select-Object -First 1
         if(-not $found){ throw "$Binary not found in $Asset" }
-        $dest=Join-Path $Bin "$Binary.exe"; $stage="$dest.new.$PID"; Copy-Item -Force $found.FullName $stage; Move-Item -Force $stage $dest
+        $stage="$dest.new.$PID"; Copy-Item -Force $found.FullName $stage; Move-Item -Force $stage $dest
     } finally { Remove-Item -Force -Recurse $tmp -ErrorAction SilentlyContinue }
 }
 function Backup-Path([string]$Path) {
@@ -318,12 +346,11 @@ try {
     foreach($pkg in 'eza-community.eza','sharkdp.bat','BurntSushi.ripgrep.MSVC','sharkdp.fd','dandavison.delta') { Install-Winget $pkg }
 
     Ensure-Directory $Bin
-    if(-not $DryRun){ Stop-ManagedOhMyPosh }
-    Install-Portable JanDeDobbeleer/oh-my-posh ("v"+$Versions.OH_MY_POSH_VERSION) ("posh-windows-amd64.exe") 'oh-my-posh' 'Oh My Posh'
-    Install-Portable atuinsh/atuin ("v"+$Versions.ATUIN_VERSION) 'atuin-x86_64-pc-windows-msvc.zip' 'atuin' 'Atuin'
-    Install-Portable junegunn/fzf ("v"+$Versions.FZF_VERSION) ("fzf-"+$Versions.FZF_VERSION+'-windows_amd64.zip') 'fzf' 'fzf'
-    Install-Portable ajeetdsouza/zoxide ("v"+$Versions.ZOXIDE_VERSION) ("zoxide-"+$Versions.ZOXIDE_VERSION+'-x86_64-pc-windows-msvc.zip') 'zoxide' 'zoxide'
-    Install-Portable twpayne/chezmoi ("v"+$Versions.CHEZMOI_VERSION) ("chezmoi_"+$Versions.CHEZMOI_VERSION+'_windows_amd64.zip') 'chezmoi' 'chezmoi'
+    Install-Portable JanDeDobbeleer/oh-my-posh ("v"+$Versions.OH_MY_POSH_VERSION) ("posh-windows-amd64.exe") 'oh-my-posh' 'Oh My Posh' $Versions.OH_MY_POSH_VERSION
+    Install-Portable atuinsh/atuin ("v"+$Versions.ATUIN_VERSION) 'atuin-x86_64-pc-windows-msvc.zip' 'atuin' 'Atuin' $Versions.ATUIN_VERSION
+    Install-Portable junegunn/fzf ("v"+$Versions.FZF_VERSION) ("fzf-"+$Versions.FZF_VERSION+'-windows_amd64.zip') 'fzf' 'fzf' $Versions.FZF_VERSION
+    Install-Portable ajeetdsouza/zoxide ("v"+$Versions.ZOXIDE_VERSION) ("zoxide-"+$Versions.ZOXIDE_VERSION+'-x86_64-pc-windows-msvc.zip') 'zoxide' 'zoxide' $Versions.ZOXIDE_VERSION
+    Install-Portable twpayne/chezmoi ("v"+$Versions.CHEZMOI_VERSION) ("chezmoi_"+$Versions.CHEZMOI_VERSION+'_windows_amd64.zip') 'chezmoi' 'chezmoi' $Versions.CHEZMOI_VERSION
 
     # Deploy a dedicated chezmoi source so existing dotfile managers are untouched.
     if(-not $DryRun){
