@@ -85,6 +85,19 @@ for legacy_color in ("#98a6b3", "#f38ba8"):
     if legacy_color in completion.lower():
         fail("Zsh completion retains a legacy non-semantic color")
 
+tmux = (ROOT / "dot_config/tmux/tmux.conf").read_text(encoding="utf-8")
+tmux_escape_time = None
+for raw in tmux.splitlines():
+    fields = raw.strip().split()
+    if len(fields) == 4 and fields[0] in {"set", "set-option"} and fields[1] == "-sg" and fields[2] == "escape-time":
+        try:
+            tmux_escape_time = int(fields[3])
+        except ValueError:
+            pass
+        break
+if tmux_escape_time is None or tmux_escape_time < 500:
+    fail("tmux escape-time is too short for reliable terminal-query replies over SSH")
+
 atuin = read_toml("dot_config/atuin/themes/terminal-env.toml")["colors"]
 atuin_expected = {
     "AlertInfo": EXPECTED["accent"],
