@@ -35,7 +35,7 @@
           "type": "session",
           "style": "plain",
           "foreground": "p:subtle",
-          "template": "{{ if .Root }}<p:danger><b>{{ if eq .OS \"windows\" }}ADMIN{{ else }}ROOT{{ end }}</b></> {{ end }}{{ if .SSHSession }}<b>{{ .HostName }}</b> {{ end }}"
+          "template": "{{ if .SSHSession }}<b>{{ .HostName }}</b> {{ end }}"
         },
         {
           "type": "path",
@@ -105,7 +105,7 @@
           "foreground_templates": [
             "{{ if .Root }}p:danger{{ end }}"
           ],
-          "template": "❯"
+          "template": "{{ if .Root }}#{{ else }}❯{{ end }}"
         },
         {
           "type": "text",

@@ -15,38 +15,41 @@ Good defaults, native shells, useful history, real completion, and no giant shel
 
 ## Install
 
-Clone the repository, then run the installer from the clone.
+One command. The bootstrap acquires only the prerequisites needed to fetch the repository, then hands off to the normal transactional installer.
 
 ### Windows 10/11
 
-Open PowerShell 7:
+Open PowerShell and run:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-.\install.ps1 -Profile workstation
+irm https://raw.githubusercontent.com/EithonX/terminal-env/master/bootstrap.ps1 | iex
 ```
 
-Requires WinGet. The installer creates a **Terminal Environment** Windows Terminal profile that runs `pwsh.exe` (PowerShell 7).
+Windows 10 workstation installs require version 2004 (build 19041) or newer because of Windows Terminal. Windows 11 Arm64 is supported through x64 application emulation. The bootstrap can repair WinGet when necessary, installs Git only when missing, then the main installer provisions PowerShell 7, Windows Terminal, pinned tools, fonts, configuration, backups, and recovery state. It does not permanently change execution policy.
 
 VS Code renders its integrated terminal separately from Windows Terminal. If prompt icons are missing there, set `terminal.integrated.fontFamily` to `'MonaspiceNe Nerd Font', monospace`.
 
 ### macOS
 
-Homebrew is required once for system packages:
-
 ```sh
-bash ./install.sh
+curl -fsSL https://raw.githubusercontent.com/EithonX/terminal-env/master/bootstrap.sh | bash
 ```
 
-The workstation profile uses the system Zsh and installs Ghostty through Homebrew.
+If Homebrew is missing, the bootstrap obtains it through Homebrew's official installer, then installs Git when needed and continues with the normal workstation installation.
 
 ### Ubuntu / Debian
 
 ```sh
-bash ./install.sh
+curl -fsSL https://raw.githubusercontent.com/EithonX/terminal-env/master/bootstrap.sh | bash
 ```
 
-SSH/headless Linux selects the `server` profile automatically. Desktop Linux selects `workstation`. Do **not** run the installer with `sudo`; it requests sudo only when system packages need it.
+SSH/headless Linux selects the `server` profile automatically. Desktop Linux selects `workstation`. Do **not** run the bootstrap or installer with `sudo`; they request elevation only for system packages.
+
+Set `TERMINAL_ENV_PROFILE`, `TERMINAL_ENV_BRANCH`, or `TERMINAL_ENV_REPO` before the bootstrap when you need a non-default profile, branch, fork, or mirror. The local bootstrap scripts also accept normal installer options.
+
+### Inspect first
+
+If you do not want to execute a network-fetched bootstrap directly, download it for inspection or clone the repository and run `install.ps1` / `install.sh` locally.
 
 ## Daily keys
 

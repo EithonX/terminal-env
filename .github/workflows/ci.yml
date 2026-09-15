@@ -23,6 +23,7 @@ jobs:
           check_together: 'yes'
           scandir: './scripts'
           additional_files: >-
+            bootstrap.sh
             install.sh
             uninstall.sh
             tests/smoke.sh

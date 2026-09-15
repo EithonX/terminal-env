@@ -6,7 +6,13 @@ Atuin's secret filter is enabled and additional credential-shaped patterns are e
 
 ## Downloads
 
-Pinned portable tools come from their upstream GitHub release assets over TLS. Asset SHA-256 digests are verified when GitHub publishes them. Zsh plugins are pinned to release refs/commits in `versions.env`.
+Pinned portable tools come from deterministic upstream GitHub release URLs over TLS. Versions are pinned in `versions.env`. The installer also attempts to retrieve GitHub's published asset digest and verifies SHA-256 when release metadata is available; a metadata/API quota failure does not block the deterministic HTTPS download. `GITHUB_TOKEN` or `GH_TOKEN` can be supplied for authenticated metadata requests. Zsh plugins are pinned to release refs/commits in `versions.env`.
+
+## Network bootstrap
+
+The convenience install commands execute `bootstrap.ps1` or `bootstrap.sh` from this repository's `master` branch over HTTPS. The bootstrap is deliberately small: it acquires Git when necessary, clones the repository, verifies that the requested ref is an updateable branch, and delegates to the normal transactional installer. It does not permanently lower PowerShell execution policy.
+
+Executing a mutable branch bootstrap means trusting the current repository contents. `TERMINAL_ENV_REPO` intentionally permits a fork or mirror and transfers the same trust to that repository. Users who need review-before-execution should inspect the bootstrap or clone the repository before running the installer.
 
 ## Paste behavior
 

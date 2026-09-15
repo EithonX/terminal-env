@@ -42,17 +42,17 @@ api_asset(){
 }
 
 download_release_asset(){
-  local repo=$1 tag=$2 asset=$3 out=$4 info url digest actual
-  info=$(api_asset "$repo" "$tag" "$asset") || die "Could not resolve $repo $tag asset $asset"
-  IFS=$'\t' read -r url digest <<<"$info"
+  local repo=$1 tag=$2 asset=$3 out=$4 url digest='' actual info
+  url="https://github.com/$repo/releases/download/$tag/$asset"
+  info=$(api_asset "$repo" "$tag" "$asset" 2>/dev/null || true)
+  if [[ -n $info ]]; then IFS=$'\t' read -r url digest <<<"$info"; fi
   say "Downloading $asset"
-  local token=${GITHUB_TOKEN:-${GH_TOKEN:-}}; local auth=(); [[ -n $token ]] && auth=(-H "Authorization: Bearer $token")
-  retry curl --proto '=https' --tlsv1.2 -fL --retry 3 -H 'User-Agent: terminal-env-installer' "${auth[@]}" -o "$out" "$url" || die "Download failed: $asset"
+  retry curl --proto '=https' --tlsv1.2 -fL --retry 3 -H 'User-Agent: terminal-env-installer' -o "$out" "$url" || die "Download failed: $asset"
   if [[ $digest == sha256:* ]]; then
     actual=$(sha256_file "$out") || die "No SHA-256 implementation available"
     [[ $actual == "${digest#sha256:}" ]] || die "SHA-256 mismatch for $asset"
-  else
-    warn "No release digest was published for $asset; transport is HTTPS but artifact integrity could not be pinned."
+  elif [[ -z $info ]]; then
+    warn "GitHub release metadata unavailable for $asset; deterministic HTTPS release URL was used."
   fi
 }
 

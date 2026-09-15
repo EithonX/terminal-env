@@ -13,12 +13,19 @@ Terminal Environment keeps shell behavior, package installation, and updates sep
 
 ## Ownership
 
-- `install.sh` / `install.ps1` — first install, migration, backups, system prerequisites.
+- `bootstrap.sh` / `bootstrap.ps1` — minimal network bootstrap: obtain Git if necessary, clone an updateable branch, and delegate.
+- `install.sh` / `install.ps1` — authoritative install/migration path, backups, system prerequisites, and transactional recovery.
 - `chezmoi` — renders managed configuration.
 - `terminal-update` — fast-forward Git source + validate + apply configuration.
 - `terminal-deps` — reconcile external tools/plugins to `versions.env`.
 - `terminal-rollback` — return to the previous applied Git revision.
 - `terminal-doctor` — diagnose the installed environment.
+
+## Bootstrap boundary
+
+The one-command bootstrap is intentionally small. It does not render configuration, install pinned portable tools itself, or maintain separate state. It obtains only the prerequisite needed to fetch the repository, clones an updateable branch into a temporary directory, and invokes the normal installer. The installer copies that Git metadata into the managed source, so later updates use the same `origin` and branch through `terminal-update`.
+
+A failed bootstrap removes its temporary checkout. Once the main installer begins, its normal transaction/rollback rules apply.
 
 ## Interaction model
 

@@ -105,6 +105,22 @@ install_github_tools(){
   )
 }
 
+install_chezmoi(){
+  if [[ -x $LOCAL_BIN/chezmoi && $($LOCAL_BIN/chezmoi --version 2>/dev/null | head -n1 || true) == *"$CHEZMOI_VERSION"* ]]; then
+    say "chezmoi $CHEZMOI_VERSION already installed"
+    return 0
+  fi
+  if [[ $DRY_RUN == 1 ]]; then say "Would install chezmoi $CHEZMOI_VERSION"; return 0; fi
+  local tmp asset
+  tmp=$(mktemp -d)
+  (
+    trap 'rm -rf "$tmp"' EXIT
+    asset="chezmoi_${CHEZMOI_VERSION}_${OS}_${ARCH}.tar.gz"
+    download_release_asset twpayne/chezmoi "v$CHEZMOI_VERSION" "$asset" "$tmp/chezmoi.tar.gz"
+    install_archive_binary "$tmp/chezmoi.tar.gz" chezmoi "$LOCAL_BIN/chezmoi"
+  )
+}
+
 install_font(){
   [[ $PROFILE == workstation && $NO_FONT == 0 ]] || return 0
   local tmp fontdir archive="Monaspace.tar.xz" state manifest list style member src base ext dest hash existing existing_hash installed_version count missing path
@@ -181,6 +197,7 @@ install_font(){
 
 install_system_packages
 install_github_tools
+install_chezmoi
 install_font
 
 if [[ $DRY_RUN == 0 ]]; then

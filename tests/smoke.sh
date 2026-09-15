@@ -5,8 +5,11 @@ source_only=0; [[ ${1:-} == --source-only ]] && source_only=1
 fail=0
 bad(){ echo "FAIL: $*" >&2; fail=1; }
 check(){ "$@" || bad "$*"; }
-check bash -n "$ROOT/install.sh" "$ROOT/uninstall.sh"
+check bash -n "$ROOT/bootstrap.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh"
 while IFS= read -r -d '' f; do check bash -n "$f"; done < <(find "$ROOT/scripts" "$ROOT/dot_local/bin" -type f -print0)
+check bash "$ROOT/bootstrap.sh" --help >/dev/null
+if bash "$ROOT/bootstrap.sh" --terminal-env-invalid-option >/dev/null 2>&1; then bad 'bootstrap.sh accepts unknown options'; fi
+if bash "$ROOT/bootstrap.sh" --branch ../bad >/dev/null 2>&1; then bad 'bootstrap.sh accepts unsafe branch names'; fi
 cli_home=$(mktemp -d)
 trap 'rm -rf "$cli_home"' EXIT
 mkdir -p "$cli_home/.local/share/terminal-env/source"
@@ -38,9 +41,9 @@ done
 ( HOME=$(mktemp -d) DRY_RUN=1 bash "$ROOT/scripts/build-zsh-plugins.sh" >/dev/null ) || bad 'nounset-safe plugin provisioning'
 python3 -m json.tool "$ROOT/dot_config/oh-my-posh/terminal.omp.json" >/dev/null || bad 'Oh My Posh JSON'
 python3 -m json.tool "$ROOT/dot_config/windows-terminal/terminal-env.json" >/dev/null || bad 'Windows Terminal JSON'
-python3 - <<PY || bad 'configuration invariants'
-import json, pathlib, re
-r=pathlib.Path(r'''$ROOT''')
+ROOT_FOR_PY="$ROOT" python3 - <<'PY' || bad 'configuration invariants'
+import json, os, pathlib, re
+r=pathlib.Path(os.environ['ROOT_FOR_PY'])
 t=json.loads((r/'dot_config/oh-my-posh/terminal.omp.json').read_text())
 assert t.get('streaming') == 100
 assert t.get('shell_integration') is True
@@ -66,9 +69,11 @@ for p in helpers:
 # Prompt should stay compact, transcript-friendly and one-line.
 assert 'transient_prompt' not in t
 blob = json.dumps(t, ensure_ascii=False)
+prompt_blob = json.dumps([b for b in t.get('blocks', []) if b.get('type') == 'prompt'], ensure_ascii=False)
 assert '❯' in blob
 assert '│' in blob
-assert 'ROOT' in blob and 'ADMIN' in blob
+assert 'ROOT' not in prompt_blob and 'ADMIN' not in prompt_blob
+assert '{{ if .Root }}#{{ else }}❯{{ end }}' in prompt_blob
 assert 'if .Root' in t.get('console_title_template', '')
 assert '╭─' not in blob
 assert '╰─' not in blob
@@ -88,7 +93,7 @@ keys=(r/'dot_config/zsh/conf.d/70-keybindings.zsh').read_text()
 for seq,widget in (("^[[C","forward-char"),("^[OC","forward-char"),("^[[D","backward-char"),("^[OD","backward-char"),("^[[1;5C","forward-word"),("^[[1;5D","backward-word")):
     assert f"bindkey '{seq}' {widget}" in keys
 prompt=(r/'dot_config/zsh/conf.d/90-prompt.zsh').read_text()
-assert 'EUID == 0' in prompt and 'ROOT' in prompt
+assert 'EUID == 0' in prompt and 'ROOT' not in prompt and '%F{203}#%f' in prompt
 psprofile=(r/'dot_config/terminal-env/powershell/profile.ps1').read_text()
 assert 'RightArrow -Function ForwardChar' in psprofile
 assert 'Ctrl+RightArrow -Function ForwardWord' in psprofile
@@ -113,6 +118,17 @@ assert 'local pkgs=(zsh ' not in install_unix
 assert 'optional+=(shellcheck' not in install_unix
 assert 'Monaspace.tar.xz' in install_unix
 assert 'Monaspace.zip' not in install_unix
+assert 'already installed' in install_unix and 'installed_version=' in install_unix
+assert 'install_chezmoi' in install_unix and 'twpayne/chezmoi' in install_unix
+common=(r/'scripts/lib/common.sh').read_text()
+assert 'https://github.com/$repo/releases/download/$tag/$asset' in common
+assert 'GITHUB_TOKEN' in common and 'GH_TOKEN' in common
+bootstrap_sh=(r/'bootstrap.sh').read_text()
+assert 'https://github.com/EithonX/terminal-env.git' in bootstrap_sh
+assert 'TERMINAL_ENV_REPO' in bootstrap_sh
+assert 'git clone --quiet --depth 1 --single-branch --branch' in bootstrap_sh
+assert 'Homebrew/install/HEAD/install.sh' in bootstrap_sh
+assert 'brew --version' in bootstrap_sh and 'apt-get' in bootstrap_sh
 for face in ('Regular','Bold','Italic','BoldItalic'):
     assert face in install_unix
 installer=(r/'install.sh').read_text()
@@ -124,6 +140,17 @@ assert 'backups/manual' in manual
 ps=(r/'install.ps1').read_text()
 assert 'Monaspace.tar.xz' in ps and 'Monaspace.zip' not in ps
 assert 'Prune-TransactionBackups 3' in ps
+assert 'already installed' in ps
+assert 'Repair-WinGetPackageManager -Force -Latest' in ps
+assert 'https://github.com/$Repo/releases/download/$Tag/$Name' in ps
+bootstrap_ps=(r/'bootstrap.ps1').read_text()
+assert 'Repair-WinGetPackageManager -Force -Latest' in bootstrap_ps
+assert "'-ExecutionPolicy','Bypass'" in bootstrap_ps
+assert 'clone --quiet --depth 1 --single-branch --branch' in bootstrap_ps
+readme=(r/'README.md').read_text()
+assert 'irm https://raw.githubusercontent.com/EithonX/terminal-env/master/bootstrap.ps1 | iex' in readme
+assert 'curl -fsSL https://raw.githubusercontent.com/EithonX/terminal-env/master/bootstrap.sh | bash' in readme
+assert "--proto '=https'" not in readme and '/bin/bash -c "$(curl' not in readme
 workflow=(r/'.github/workflows/ci.yml').read_text()
 assert 'ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38e' in workflow
 assert 'version: v0.11.0' in workflow

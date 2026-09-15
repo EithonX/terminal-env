@@ -7,36 +7,84 @@ param(
     [switch]$Force
 )
 $ErrorActionPreference = 'Stop'
+if($env:OS -ne 'Windows_NT'){ throw 'install.ps1 supports Windows only. Use install.sh on macOS or Linux.' }
+if([Environment]::OSVersion.Version.Build -lt 17763){ throw 'Windows 10 version 1809 (build 17763) or newer is required.' }
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Versions = @{}
 Get-Content (Join-Path $Root 'versions.env') | Where-Object { $_ -match '^[A-Z0-9_]+=' } | ForEach-Object {
     $k,$v = $_ -split '=',2; $Versions[$k]=$v
 }
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    if ($DryRun) { Write-Host 'Would install PowerShell 7 and reinvoke the installer.' -ForegroundColor Cyan; exit 0 }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'PowerShell 7 and winget are required.' }
-    Write-Host 'Installing PowerShell 7 before continuing...' -ForegroundColor Cyan
-    & winget install --id Microsoft.PowerShell --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 installation failed.' }
-    # WinGet defaults to MSIX for PowerShell 7.6+, while older systems may
-    # already use MSI. Resolve either layout instead of assuming Program Files.
-    $pwshCandidates = @()
+$script:WingetExe=$null
+function Test-WinGet([string]$Path) {
+    if(-not $Path -or -not(Test-Path -LiteralPath $Path -PathType Leaf)){ return $false }
+    try { & $Path --version *> $null; return $LASTEXITCODE -eq 0 } catch { return $false }
+}
+function Resolve-WinGet([switch]$Repair) {
+    if($script:WingetExe -and (Test-WinGet $script:WingetExe)){ return $script:WingetExe }
+    $cmd=Get-Command winget.exe -ErrorAction SilentlyContinue
+    if($cmd -and (Test-WinGet $cmd.Source)){ $script:WingetExe=$cmd.Source; return $script:WingetExe }
+    $alias=Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
+    if(Test-WinGet $alias){ $script:WingetExe=$alias; return $script:WingetExe }
+    if(-not $Repair){ return $null }
+    try { Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop } catch {}
+    $cmd=Get-Command winget.exe -ErrorAction SilentlyContinue
+    if($cmd -and (Test-WinGet $cmd.Source)){ $script:WingetExe=$cmd.Source; return $script:WingetExe }
+    if(Test-WinGet $alias){ $script:WingetExe=$alias; return $script:WingetExe }
     try {
-        $appx = Get-AppxPackage -Name Microsoft.PowerShell -ErrorAction Stop |
-            Sort-Object Version -Descending | Select-Object -First 1
-        if ($appx -and $appx.InstallLocation) {
-            $pwshCandidates += (Join-Path $appx.InstallLocation 'pwsh.exe')
-        }
+        $protocol=[Net.ServicePointManager]::SecurityProtocol
+        [Net.ServicePointManager]::SecurityProtocol=$protocol -bor [Net.SecurityProtocolType]::Tls12
+        Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null
+        Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser -AllowClobber | Out-Null
+        Import-Module Microsoft.WinGet.Client -Force
+        Repair-WinGetPackageManager -Force -Latest | Out-Null
+        [Net.ServicePointManager]::SecurityProtocol=$protocol
+    } catch {
+        if($null -ne $protocol){ [Net.ServicePointManager]::SecurityProtocol=$protocol }
+    }
+    $cmd=Get-Command winget.exe -ErrorAction SilentlyContinue
+    if($cmd -and (Test-WinGet $cmd.Source)){ $script:WingetExe=$cmd.Source; return $script:WingetExe }
+    if(Test-WinGet $alias){ $script:WingetExe=$alias; return $script:WingetExe }
+    throw 'WinGet could not be registered or repaired. Install Microsoft App Installer and rerun the installer.'
+}
+function Resolve-PowerShell7 {
+    $candidates=@()
+    $cmd=Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    if($cmd){ $candidates+=$cmd.Source }
+    try {
+        $appx=Get-AppxPackage -Name Microsoft.PowerShell -ErrorAction Stop | Sort-Object Version -Descending | Select-Object -First 1
+        if($appx -and $appx.InstallLocation){ $candidates+=(Join-Path $appx.InstallLocation 'pwsh.exe') }
     } catch {}
-    $pwshCandidates += (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe')
-    $pwshCandidates += (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
-    $pwsh = $pwshCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -Unique -First 1
-    if (-not $pwsh) { throw 'PowerShell 7 installed but pwsh.exe could not be resolved (MSIX or MSI).' }
+    $candidates+=(Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe')
+    $candidates+=(Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
+    foreach($candidate in @($candidates | Select-Object -Unique)){
+        if(-not $candidate -or -not(Test-Path -LiteralPath $candidate -PathType Leaf)){ continue }
+        try {
+            $major=(& $candidate -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.Major' 2>$null | Select-Object -First 1)
+            if($LASTEXITCODE -eq 0 -and [int]$major -ge 7){ return $candidate }
+        } catch {}
+    }
+    return $null
+}
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $pwsh=Resolve-PowerShell7
+    if(-not $pwsh){
+        if ($DryRun) { Write-Host 'Would install PowerShell 7 and reinvoke the installer.' -ForegroundColor Cyan; exit 0 }
+        $winget=Resolve-WinGet -Repair
+        Write-Host 'Installing PowerShell 7 before continuing...' -ForegroundColor Cyan
+        & $winget install --id Microsoft.PowerShell --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+        if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 installation failed.' }
+        $pwsh=Resolve-PowerShell7
+        if(-not $pwsh){ throw 'PowerShell 7 installed but pwsh.exe could not be resolved.' }
+    }
     $forward=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Profile',$Profile)
     if($DryRun){$forward+='-DryRun'}; if($NoFont){$forward+='-NoFont'}; if($NoTerminalConfig){$forward+='-NoTerminalConfig'}; if($Force){$forward+='-Force'}
     & $pwsh @forward; exit $LASTEXITCODE
 }
 if ($Profile -eq 'auto') { $Profile='workstation' }
+if($Profile -eq 'workstation' -and -not $NoTerminalConfig -and [Environment]::OSVersion.Version.Build -lt 19041){ throw 'Windows Terminal requires Windows 10 version 2004 (build 19041) or newer.' }
+$osArch=[Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+if($osArch -eq 'arm64' -and [Environment]::OSVersion.Version.Build -lt 22000){ throw 'Windows 10 on Arm cannot run the x64 portable dependencies required by Terminal Environment. Windows 11 or newer is required on Arm64.' }
+if($osArch -notin @('x64','arm64')){ throw "Unsupported Windows architecture: $osArch" }
 $State = Join-Path $HOME '.local\state\terminal-env'
 $Source = Join-Path $HOME '.local\share\terminal-env\source'
 $Bin = Join-Path $HOME '.local\bin'
@@ -213,34 +261,40 @@ function Install-ManagedFonts {
     } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-function Install-Winget([string]$Id, [switch]$Required) {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { if($Required){ throw 'winget is required on Windows 10/11.' }; Warn "winget unavailable; skipped $Id"; return }
+function Install-Winget([string]$Id,[string]$Command,[switch]$Required) {
     Info "Ensuring $Id"
-    if ($DryRun) { return }
-    $listed = (& winget list --id $Id --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
-    if ($LASTEXITCODE -eq 0 -and $listed -match [regex]::Escape($Id)) { return }
-    & winget install --id $Id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if ($LASTEXITCODE -ne 0) { if($Required){ throw "Failed to install $Id" } else { Warn "Optional package failed: $Id" } }
+    if($Command -and (Get-Command $Command -ErrorAction SilentlyContinue)){ return }
+    $winget=Resolve-WinGet -Repair:(-not $DryRun)
+    if($DryRun){ return }
+    if(-not $winget){ if($Required){ throw 'winget is required on Windows 10/11.' }; Warn "winget unavailable; skipped $Id"; return }
+    $listed=(& $winget list --id $Id --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
+    if($LASTEXITCODE -eq 0 -and $listed -match [regex]::Escape($Id)){ return }
+    & $winget install --id $Id --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+    if($LASTEXITCODE -ne 0){ if($Required){ throw "Failed to install $Id" } else { Warn "Optional package failed: $Id" } }
 }
 function Get-GitHubAsset([string]$Repo,[string]$Tag,[string]$Name,[string]$Out) {
-    $headers=@{ 'User-Agent'='terminal-env-installer'; 'Accept'='application/vnd.github+json' }
+    $downloadHeaders=@{ 'User-Agent'='terminal-env-installer' }
+    $url="https://github.com/$Repo/releases/download/$Tag/$Name"
+    $digest=$null
+    $apiHeaders=@{ 'User-Agent'='terminal-env-installer'; 'Accept'='application/vnd.github+json' }
     $token=if($env:GITHUB_TOKEN){$env:GITHUB_TOKEN}elseif($env:GH_TOKEN){$env:GH_TOKEN}else{$null}
-    if($token){$headers.Authorization="Bearer $token"}
-    try { $release=Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag" }
-    catch {
-        $status=$null
-        try { $status=[int]$_.Exception.Response.StatusCode } catch {}
-        if($status -eq 403){ throw "GitHub API rejected $Repo $Tag with HTTP 403. Set GITHUB_TOKEN or GH_TOKEN and retry if the API rate limit was reached." }
-        throw
+    if($token){$apiHeaders.Authorization="Bearer $token"}
+    try {
+        $release=Invoke-RestMethod -Headers $apiHeaders -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+        $asset=$release.assets | Where-Object name -eq $Name | Select-Object -First 1
+        if($asset){
+            if($asset.browser_download_url){$url=$asset.browser_download_url}
+            if($asset.digest -and $asset.digest.StartsWith('sha256:')){$digest=$asset.digest.Substring(7).ToLowerInvariant()}
+        }
+    } catch {
+        Warn "GitHub release metadata unavailable for $Name; using the deterministic HTTPS release URL."
     }
-    $asset=$release.assets | Where-Object name -eq $Name | Select-Object -First 1
-    if(-not $asset){ throw "Asset $Name not found for $Repo $Tag" }
     Info "Downloading $Name"
-    Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $Out
-    if($asset.digest -and $asset.digest.StartsWith('sha256:')){
+    Invoke-WebRequest -Headers $downloadHeaders -Uri $url -OutFile $Out
+    if($digest){
         $actual=(Get-FileHash -Algorithm SHA256 $Out).Hash.ToLowerInvariant()
-        if($actual -ne $asset.digest.Substring(7).ToLowerInvariant()){ throw "SHA-256 mismatch: $Name" }
-    } else { Warn "GitHub did not expose an asset digest for $Name" }
+        if($actual -ne $digest){ throw "SHA-256 mismatch: $Name" }
+    }
 }
 function Install-Portable([string]$Repo,[string]$Tag,[string]$Asset,[string]$Binary,[string]$Name,[string]$Version) {
     $dest=Join-Path $Bin "$Binary.exe"
@@ -340,16 +394,20 @@ try {
     }
 
     # Native foundation. Portable CLI versions below are pinned independently.
-    Install-Winget Microsoft.PowerShell -Required
-    Install-Winget Microsoft.WindowsTerminal -Required
-    Install-Winget Git.Git -Required
-    foreach($pkg in 'eza-community.eza','sharkdp.bat','BurntSushi.ripgrep.MSVC','sharkdp.fd','dandavison.delta') { Install-Winget $pkg }
+    Install-Winget Microsoft.PowerShell 'pwsh.exe' -Required
+    Install-Winget Git.Git 'git.exe' -Required
+    if($Profile -eq 'workstation' -and -not $NoTerminalConfig){ Install-Winget Microsoft.WindowsTerminal 'wt.exe' -Required }
+    if($Profile -ne 'minimal'){
+        foreach($pkg in @(@('eza-community.eza','eza.exe'),@('sharkdp.bat','bat.exe'),@('BurntSushi.ripgrep.MSVC','rg.exe'),@('sharkdp.fd','fd.exe'),@('dandavison.delta','delta.exe'))){ Install-Winget $pkg[0] $pkg[1] }
+    }
 
     Ensure-Directory $Bin
-    Install-Portable JanDeDobbeleer/oh-my-posh ("v"+$Versions.OH_MY_POSH_VERSION) ("posh-windows-amd64.exe") 'oh-my-posh' 'Oh My Posh' $Versions.OH_MY_POSH_VERSION
-    Install-Portable atuinsh/atuin ("v"+$Versions.ATUIN_VERSION) 'atuin-x86_64-pc-windows-msvc.zip' 'atuin' 'Atuin' $Versions.ATUIN_VERSION
-    Install-Portable junegunn/fzf ("v"+$Versions.FZF_VERSION) ("fzf-"+$Versions.FZF_VERSION+'-windows_amd64.zip') 'fzf' 'fzf' $Versions.FZF_VERSION
-    Install-Portable ajeetdsouza/zoxide ("v"+$Versions.ZOXIDE_VERSION) ("zoxide-"+$Versions.ZOXIDE_VERSION+'-x86_64-pc-windows-msvc.zip') 'zoxide' 'zoxide' $Versions.ZOXIDE_VERSION
+    if($Profile -ne 'minimal'){
+        Install-Portable JanDeDobbeleer/oh-my-posh ("v"+$Versions.OH_MY_POSH_VERSION) 'posh-windows-amd64.exe' 'oh-my-posh' 'Oh My Posh' $Versions.OH_MY_POSH_VERSION
+        Install-Portable atuinsh/atuin ("v"+$Versions.ATUIN_VERSION) 'atuin-x86_64-pc-windows-msvc.zip' 'atuin' 'Atuin' $Versions.ATUIN_VERSION
+        Install-Portable junegunn/fzf ("v"+$Versions.FZF_VERSION) ("fzf-"+$Versions.FZF_VERSION+'-windows_amd64.zip') 'fzf' 'fzf' $Versions.FZF_VERSION
+        Install-Portable ajeetdsouza/zoxide ("v"+$Versions.ZOXIDE_VERSION) ("zoxide-"+$Versions.ZOXIDE_VERSION+'-x86_64-pc-windows-msvc.zip') 'zoxide' 'zoxide' $Versions.ZOXIDE_VERSION
+    }
     Install-Portable twpayne/chezmoi ("v"+$Versions.CHEZMOI_VERSION) ("chezmoi_"+$Versions.CHEZMOI_VERSION+'_windows_amd64.zip') 'chezmoi' 'chezmoi' $Versions.CHEZMOI_VERSION
 
     # Deploy a dedicated chezmoi source so existing dotfile managers are untouched.
@@ -393,7 +451,7 @@ try {
     }
 
     # Windows Terminal fragment is additive; preserve any pre-existing fragment at our namespace.
-    if(-not $NoTerminalConfig -and -not $DryRun){
+    if($Profile -eq 'workstation' -and -not $NoTerminalConfig -and -not $DryRun){
         $fragDir=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\terminal-env'
         New-Item -ItemType Directory -Force (Join-Path $Backup 'external') | Out-Null
         if(Test-Path $fragDir){ Copy-Item -Recurse -Force $fragDir (Join-Path $Backup 'external\WindowsTerminal-fragment'); Set-Content -LiteralPath (Join-Path $Backup 'external\WindowsTerminal-fragment-existed') -Value '1' -NoNewline -Encoding utf8NoBOM }
@@ -422,7 +480,7 @@ try {
         New-Item -ItemType File -Force -Path (Join-Path $Backup '.complete') | Out-Null
         Prune-TransactionBackups 3
         Good "Installation complete. Transaction backup: $Backup"
-        Write-Host 'Open a new Windows Terminal tab using the Terminal Environment profile.'
+        if($Profile -eq 'workstation' -and -not $NoTerminalConfig){ Write-Host 'Open a new Windows Terminal tab using the Terminal Environment profile.' } else { Write-Host 'Open a new PowerShell 7 session.' }
     }
     $InstallActive = $false
 } catch {

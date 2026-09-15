@@ -130,14 +130,6 @@ fi
 bash "$ROOT/scripts/install-tools-unix.sh"
 
 if [[ $DRY_RUN == 0 ]]; then
-  OS=$(os_name); ARCH=$(arch_name); TMP=$(mktemp -d)
-  ASSET="chezmoi_${CHEZMOI_VERSION}_${OS}_${ARCH}.tar.gz"
-  (
-    trap 'rm -rf "$TMP"' EXIT
-    download_release_asset twpayne/chezmoi "v$CHEZMOI_VERSION" "$ASSET" "$TMP/chezmoi.tar.gz"
-    install_archive_binary "$TMP/chezmoi.tar.gz" chezmoi "$LOCAL_BIN/chezmoi"
-  )
-
   if [[ $SAME_SOURCE == 0 ]]; then
     if [[ -e $SOURCE && $FORCE != 1 && ! -f $SOURCE/.terminal-env-source ]]; then
       die "$SOURCE exists and is not managed by Terminal Environment. Use --force only if you intend to replace it."
