@@ -18,11 +18,22 @@ def write_exe(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
-def run_doctor(home: Path, fakebin: Path, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def build_system_bin(base: Path) -> Path:
+    system_bin = base / 'system-bin'
+    system_bin.mkdir()
+    for name in ('bash', 'cat', 'dirname', 'du', 'awk', 'wc', 'tr', 'head', 'find', 'python3'):
+        resolved = shutil.which(name)
+        if not resolved:
+            raise AssertionError(f'required test utility is unavailable: {name}')
+        (system_bin / name).symlink_to(resolved)
+    return system_bin
+
+
+def run_doctor(home: Path, fakebin: Path, system_bin: Path, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update({
         'HOME': str(home),
-        'PATH': str(fakebin) + os.pathsep + env['PATH'],
+        'PATH': os.pathsep.join((str(fakebin), str(system_bin))),
         'TERM': 'xterm-256color',
         'COLORTERM': 'truecolor',
         'SHELL': '/bin/zsh',
@@ -39,6 +50,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-doctor-') as td:
     home = base / 'home'
     fakebin = base / 'bin'
     fakebin.mkdir(parents=True)
+    system_bin = build_system_bin(base)
 
     versions = {
         'zsh': 'zsh 5.9 (x86_64-test)\n',
@@ -88,21 +100,21 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-doctor-') as td:
     (plugins / 'zsh-completions/src').mkdir(parents=True)
     (home / '.local/share/terminal-env/source/.git').mkdir(parents=True)
 
-    healthy = run_doctor(home, fakebin, '--quick', '--color', 'never')
+    healthy = run_doctor(home, fakebin, system_bin, '--quick', '--color', 'never')
     assert healthy.returncode == 0, healthy.stderr
     assert 'Terminal Environment · doctor' in healthy.stdout
     assert 'Healthy · ' in healthy.stdout
     assert 'PASS' not in healthy.stdout and 'WARN' not in healthy.stdout and 'FAIL' not in healthy.stdout
     assert '\x1b[' not in healthy.stdout
 
-    plain = run_doctor(home, fakebin, '--quick', '--format', 'plain', '--color', 'always')
+    plain = run_doctor(home, fakebin, system_bin, '--quick', '--format', 'plain', '--color', 'always')
     assert plain.returncode == 0, plain.stderr
     assert plain.stdout.startswith('meta\tprofile\tworkstation\n')
     assert '\ncheck\tpass\tgit\tShell\tGit\t2.51.0\t\n' in '\n' + plain.stdout
     assert plain.stdout.rstrip().splitlines()[-1].startswith('summary\t')
     assert '\x1b[' not in plain.stdout
 
-    structured = run_doctor(home, fakebin, '--quick', '--format=json')
+    structured = run_doctor(home, fakebin, system_bin, '--quick', '--format=json')
     assert structured.returncode == 0, structured.stderr
     payload = json.loads(structured.stdout)
     assert payload['command'] == 'doctor'
@@ -113,45 +125,45 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-doctor-') as td:
     assert any(c['id'] == 'git' and c['value'] == '2.51.0' for c in payload['checks'])
 
     (fakebin / 'fzf').unlink()
-    attention = run_doctor(home, fakebin, '--quick', '--color=never')
+    attention = run_doctor(home, fakebin, system_bin, '--quick', '--color=never')
     assert attention.returncode == 0, attention.stderr
     assert 'Attention' in attention.stdout
     assert 'warning · fzf is missing' in attention.stdout
     assert 'PASS' not in attention.stdout and 'WARN' not in attention.stdout
 
-    narrow = run_doctor(home, fakebin, '--quick', '--color=never', extra_env={'COLUMNS': '50'})
+    narrow = run_doctor(home, fakebin, system_bin, '--quick', '--color=never', extra_env={'COLUMNS': '50'})
     assert '  fzf\n    warning · fzf is missing' in narrow.stdout
     normal_line = next(line for line in attention.stdout.splitlines() if 'warning · fzf is missing' in line)
     assert normal_line.index('warning') == 20
-    wide = run_doctor(home, fakebin, '--quick', '--color=never', extra_env={'COLUMNS': '120'})
+    wide = run_doctor(home, fakebin, system_bin, '--quick', '--color=never', extra_env={'COLUMNS': '120'})
     wide_line = next(line for line in wide.stdout.splitlines() if 'warning · fzf is missing' in line)
     assert wide_line.index('warning') == 24
 
-    colored = run_doctor(home, fakebin, '--quick', '--color=always')
+    colored = run_doctor(home, fakebin, system_bin, '--quick', '--color=always')
     assert '\x1b[' in colored.stdout
-    no_color = run_doctor(home, fakebin, '--quick', extra_env={'NO_COLOR': '1'})
+    no_color = run_doctor(home, fakebin, system_bin, '--quick', extra_env={'NO_COLOR': '1'})
     assert '\x1b[' not in no_color.stdout
 
     (state / 'profile').write_bytes(b'workstation\x1b[31m\n')
-    sanitized = run_doctor(home, fakebin, '--quick', '--verbose', '--color=never')
+    sanitized = run_doctor(home, fakebin, system_bin, '--quick', '--verbose', '--color=never')
     assert '\x1b' not in sanitized.stdout
     assert 'workstation [31m' in sanitized.stdout
     (state / 'profile').write_text('workstation\n')
 
-    quiet = run_doctor(home, fakebin, '--quick', '--quiet')
+    quiet = run_doctor(home, fakebin, system_bin, '--quick', '--quiet')
     assert quiet.returncode == 0
     assert quiet.stdout == ''
 
     write_exe(fakebin / 'fzf', "if [[ ${1:-} == --version ]]; then printf '0.74.4\\n'; fi\nexit 0\n")
     (fakebin / 'oh-my-posh').unlink()
     (config / 'oh-my-posh/terminal.omp.json').write_text('{broken\n')
-    failed = run_doctor(home, fakebin, '--quick', '--format', 'json')
+    failed = run_doctor(home, fakebin, system_bin, '--quick', '--format', 'json')
     assert failed.returncode == 1
     failed_payload = json.loads(failed.stdout)
     assert failed_payload['summary']['failure'] >= 1
     assert any(c['id'] == 'omp_theme' and c['status'] == 'fail' for c in failed_payload['checks'])
 
-    invalid = run_doctor(home, fakebin, '--format', 'xml')
+    invalid = run_doctor(home, fakebin, system_bin, '--format', 'xml')
     assert invalid.returncode == 2
     assert 'Invalid format: xml' in invalid.stderr
 
