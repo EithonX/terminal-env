@@ -770,8 +770,8 @@ function Invoke-TerminalEnvContextCommand {
                 $cwd = $CommandArgs[++$i]
             }
             '--prompt-record' { $format = 'prompt-record' }
-            '-h' { Show-TerminalEnvContextUsage; return 0 }
-            '--help' { Show-TerminalEnvContextUsage; return 0 }
+            '-h' { Show-TerminalEnvContextUsage; return }
+            '--help' { Show-TerminalEnvContextUsage; return }
             default { throw "Unknown option: $($CommandArgs[$i])" }
         }
     }
@@ -783,7 +783,7 @@ function Invoke-TerminalEnvContextCommand {
         'prompt-record' { Write-Output ("{0}`t{1}" -f $context.prompt.state, $context.prompt.text) }
         default { Write-TerminalEnvContextHuman $context }
     }
-    return 0
+    return
 }
 
 $script:TerminalEnvContextCacheKey = ''
@@ -793,8 +793,8 @@ $script:TerminalEnvContextCacheState = 'normal'
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        $code = Invoke-TerminalEnvContextCommand -CommandArgs @($args)
-        exit $code
+        Invoke-TerminalEnvContextCommand -CommandArgs @($args)
+        exit 0
     } catch {
         Write-Error $_.Exception.Message
         exit 2

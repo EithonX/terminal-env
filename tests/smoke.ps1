@@ -107,7 +107,7 @@ foreach ($pair in @(
 }
 function Assert-TerminalEnvOutputLines {
     param(
-        [Parameter(Mandatory=$true)][object[]]$CapturedOutput,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$CapturedOutput,
         [Parameter(Mandatory=$true)][string[]]$RequiredLines,
         [Parameter(Mandatory=$true)][string]$Message
     )
@@ -129,6 +129,17 @@ $terminalDepsCheckHelp=@(& $terminalPath 'deps' 'check' '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalDepsCheckHelp -RequiredLines @('Usage: terminal deps [status|sync] [options]','terminal-deps [status|sync] [options]') -Message 'Unified terminal deps check alias failed'
 $terminalContextHelp=@(& $terminalPath 'context' '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalContextHelp -RequiredLines @('Usage: terminal context [options]','terminal-context [options]') -Message 'Unified terminal context help is inconsistent'
+$contextScriptPath=Join-Path $root 'dot_config\terminal-env\powershell\context.ps1'
+$standaloneContextHelp=@(& $contextScriptPath '--help')
+Assert-TerminalEnvOutputLines -CapturedOutput $standaloneContextHelp -RequiredLines @('Usage: terminal context [options]','terminal-context [options]') -Message 'PowerShell terminal-context help emitted no usable output'
+$standaloneContextJson=@(& $contextScriptPath '--cwd' $root '--format' 'json') -join "`n"
+if([string]::IsNullOrWhiteSpace($standaloneContextJson)){throw 'PowerShell terminal-context JSON output is empty'}
+$standaloneContextPayload=$standaloneContextJson|ConvertFrom-Json
+if($standaloneContextPayload.schema_version -ne 1 -or [string]::IsNullOrWhiteSpace([string]$standaloneContextPayload.cwd)){throw 'PowerShell terminal-context JSON contract is invalid'}
+$unifiedContextJson=@(& $terminalPath 'context' '--cwd' $root '--format' 'json') -join "`n"
+if([string]::IsNullOrWhiteSpace($unifiedContextJson)){throw 'Unified terminal context JSON output is empty'}
+$unifiedContextPayload=$unifiedContextJson|ConvertFrom-Json
+if($unifiedContextPayload.schema_version -ne 1 -or [string]::IsNullOrWhiteSpace([string]$unifiedContextPayload.cwd)){throw 'Unified terminal context JSON contract is invalid'}
 $profileTerminalFunctions=@($asts[(Join-Path $root 'dot_config\terminal-env\powershell\profile.ps1')].FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'terminal'},$true))
 if($profileTerminalFunctions.Count -ne 1){throw 'PowerShell profile does not expose unified terminal command'}
 $depsText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1') -Raw
