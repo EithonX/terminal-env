@@ -246,6 +246,8 @@ function Install-ManagedFonts {
         $reg='HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'; New-Item -Path $reg -Force | Out-Null
         $external=Join-Path $Backup 'external'; New-Item -ItemType Directory -Force $external | Out-Null
         $regBackup=Join-Path $external 'font-registry.json'
+        $oldFontBackup=Join-Path $external 'font-old-files'
+        $legacyRegBackup=@{}
         $regNames=@{}
         foreach($style in 'Regular','Bold','Italic','BoldItalic'){
             $name="Terminal Environment Monaspice Neon $style (TrueType)"
@@ -288,6 +290,8 @@ function Install-ManagedFonts {
         $stale=@()
         foreach($file in @(Get-ChildItem -LiteralPath $fontDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^MonaspiceNeNerdFont-.*\.terminal-env-.*\.(otf|ttf)$' })){
             if($current -contains [IO.Path]::GetFullPath($file.FullName)){ continue }
+            New-Item -ItemType Directory -Force $oldFontBackup | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $oldFontBackup $file.Name) -Force
             try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop } catch { $stale += $file.FullName }
         }
         # Early development builds copied every Monaspice Neon variant under the upstream
@@ -300,9 +304,13 @@ function Install-ManagedFonts {
             $legacyReg=$file.BaseName+' (TrueType)'; $legacyValue=$null
             try { $legacyValue=Get-ItemPropertyValue -LiteralPath $reg -Name $legacyReg -ErrorAction Stop } catch {}
             if(-not $legacyValue -or -not [IO.Path]::GetFullPath([string]$legacyValue).Equals($full,[StringComparison]::OrdinalIgnoreCase)){ continue }
+            New-Item -ItemType Directory -Force $oldFontBackup | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $oldFontBackup $file.Name) -Force
+            $legacyRegBackup[$legacyReg]=[string]$legacyValue
             Remove-ItemProperty -LiteralPath $reg -Name $legacyReg -Force -ErrorAction SilentlyContinue
             try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop } catch { $stale += $file.FullName }
         }
+        if($legacyRegBackup.Count){ Set-Content -LiteralPath (Join-Path $external 'font-legacy-registry.json') -Value ($legacyRegBackup | ConvertTo-Json) -Encoding utf8NoBOM }
         if(Test-Path -LiteralPath (Join-Path $fontState 'stale.txt')){
             foreach($old in Get-Content -LiteralPath (Join-Path $fontState 'stale.txt')){
                 if($old -and (Test-Path -LiteralPath $old) -and -not($stale -contains $old)){ try{Remove-Item -LiteralPath $old -Force -ErrorAction Stop}catch{$stale += $old} }
@@ -416,6 +424,17 @@ function Restore-Transaction {
     }
     $newFonts=Join-Path $Backup 'external\font-new-files.txt'
     if(Test-Path -LiteralPath $newFonts){ foreach($f in Get-Content -LiteralPath $newFonts){ Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+    $oldFonts=Join-Path $Backup 'external\font-old-files'
+    if(Test-Path -LiteralPath $oldFonts -PathType Container){
+        $fontDir=Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+        New-Item -ItemType Directory -Force $fontDir | Out-Null
+        Get-ChildItem -LiteralPath $oldFonts -File | Copy-Item -Destination $fontDir -Force
+    }
+    $legacyFontReg=Join-Path $Backup 'external\font-legacy-registry.json'
+    if(Test-Path -LiteralPath $legacyFontReg -PathType Leaf){
+        $savedLegacy=Get-Content -LiteralPath $legacyFontReg -Raw | ConvertFrom-Json
+        foreach($prop in $savedLegacy.PSObject.Properties){ New-ItemProperty -LiteralPath $fontKey -Name $prop.Name -Value ([string]$prop.Value) -PropertyType String -Force | Out-Null }
+    }
     if($PreviousLastBackup){ Set-Content -LiteralPath (Join-Path $State 'last-install-backup') -Value $PreviousLastBackup -NoNewline -Encoding utf8NoBOM }
     else { Remove-Item -LiteralPath (Join-Path $State 'last-install-backup') -Force -ErrorAction SilentlyContinue }
     Cleanup-FailedTransaction $Backup

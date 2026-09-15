@@ -90,6 +90,7 @@ MANAGED_TARGETS=(
   "$HOME/.config/ghostty"
   "$HOME/.config/tmux"
   "$HOME/.config/terminal-env"
+  "$STATE/fonts"
   "$HOME/.local/share/terminal-env/zsh-plugins"
   "$SOURCE"
   "$HOME/.local/bin/oh-my-posh"
@@ -104,6 +105,7 @@ MANAGED_TARGETS=(
   "$HOME/.local/bin/terminal-backup"
   "$HOME/.local/bin/terminal-deps"
   "$HOME/.local/bin/terminal-context"
+  "$HOME/.local/bin/deja"
 )
 
 HELPER_TARGETS=(
@@ -121,6 +123,34 @@ if [[ -d $SOURCE ]] && [[ $(canonical_dir "$ROOT" || true) == $(canonical_dir "$
 
 PLATFORM="$(uname -s)"
 ARCH="$(uname -m)"
+managed_font_dir(){
+  case "$PLATFORM" in
+    Darwin) printf '%s\n' "$HOME/Library/Fonts" ;;
+    Linux) printf '%s\n' "$HOME/.local/share/fonts" ;;
+    *) return 1 ;;
+  esac
+}
+snapshot_managed_fonts(){
+  [[ $PROFILE == workstation && $NO_FONT == 0 ]] || return 0
+  local fontdir font
+  fontdir=$(managed_font_dir) || return 0
+  [[ -d $fontdir ]] || return 0
+  shopt -s nullglob
+  for font in "$fontdir"/MonaspiceNeNerdFont-*.terminal-env-*.otf "$fontdir"/MonaspiceNeNerdFont-*.terminal-env-*.ttf; do
+    backup_path "$font" "$BACKUP"
+  done
+  shopt -u nullglob
+}
+remove_current_managed_fonts(){
+  [[ $PROFILE == workstation && $NO_FONT == 0 ]] || return 0
+  local fontdir
+  fontdir=$(managed_font_dir) || return 0
+  [[ -d $fontdir ]] || return 0
+  shopt -s nullglob
+  rm -f -- "$fontdir"/MonaspiceNeNerdFont-*.terminal-env-*.otf "$fontdir"/MonaspiceNeNerdFont-*.terminal-env-*.ttf
+  shopt -u nullglob
+  if [[ $PLATFORM == Linux ]] && have fc-cache; then fc-cache -f "$fontdir" >/dev/null 2>&1 || true; fi
+}
 preflight_install(){
   case "$PLATFORM" in
     Linux|Darwin) ;;
@@ -221,6 +251,7 @@ rollback_install(){
   printf '%s\n' 'Managed files are being restored from the transaction snapshot.' >&2
   set +e
   local target
+  remove_current_managed_fonts
   for target in "${MANAGED_TARGETS[@]}"; do
     [[ $SAME_SOURCE == 1 && $target == "$SOURCE" ]] && continue
     rm -rf -- "$target"
@@ -241,6 +272,7 @@ if [[ $DRY_RUN == 0 ]]; then
     [[ $SAME_SOURCE == 1 && $target == "$SOURCE" ]] && continue
     backup_path "$target" "$BACKUP"
   done
+  snapshot_managed_fonts
   [[ -f "$STATE/original-backup" ]] || printf '%s\n' "$BACKUP" > "$STATE/original-backup"
   [[ -f "$STATE/original-shell" ]] || printf '%s\n' "${SHELL:-}" > "$STATE/original-shell"
   printf '%s\n' "$PROFILE" > "$STATE/profile"
@@ -317,27 +349,6 @@ EOF2
 
 fi
 
-if [[ $DRY_RUN == 0 && $NO_SHELL_CHANGE == 0 && $PROFILE != minimal ]]; then
-  ZSH_BIN=$(command -v zsh || true)
-  if [[ -n $ZSH_BIN && ${SHELL:-} != "$ZSH_BIN" ]]; then
-    if (( EUID == 0 )); then
-      if chsh -s "$ZSH_BIN" "$LOGIN_USER" 2>/dev/null; then
-        :
-      else
-        warn "Could not change login shell; run: chsh -s $ZSH_BIN $LOGIN_USER"
-      fi
-    elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-      if sudo chsh -s "$ZSH_BIN" "$LOGIN_USER"; then
-        :
-      else
-        warn "Could not change login shell; run: chsh -s $ZSH_BIN"
-      fi
-    else
-      warn "Login shell was not changed non-interactively. Run: chsh -s $ZSH_BIN"
-    fi
-  fi
-fi
-
 if [[ $DRY_RUN == 0 ]]; then
   install_stage Verify
   [[ -x "$HOME/.local/bin/terminal" ]] || die 'Managed terminal command was not installed.'
@@ -351,6 +362,27 @@ if [[ $DRY_RUN == 0 ]]; then
   prune_transaction_backups 3
   INSTALL_ACTIVE=0
   trap - ERR
+  if [[ $NO_SHELL_CHANGE == 0 && $PROFILE != minimal ]]; then
+    ZSH_BIN=$(command -v zsh || true)
+    if [[ -n $ZSH_BIN && ${SHELL:-} != "$ZSH_BIN" ]]; then
+      if (( EUID == 0 )); then
+        if chsh -s "$ZSH_BIN" "$LOGIN_USER" 2>/dev/null; then
+          :
+        else
+          warn "Could not change login shell; run: chsh -s $ZSH_BIN $LOGIN_USER"
+        fi
+      elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        if sudo chsh -s "$ZSH_BIN" "$LOGIN_USER"; then
+          :
+        else
+          warn "Could not change login shell; run: chsh -s $ZSH_BIN"
+        fi
+      else
+        warn "Login shell was not changed non-interactively. Run: chsh -s $ZSH_BIN"
+      fi
+    fi
+  fi
+
   install_stage Finish
   render_install_result installed
 else

@@ -61,10 +61,20 @@ fi
 [[ ! -f "$HOME/.terminal-env-doctor-fail" ]]
 DOCTOR
 chmod +x "$HOME/.local/bin/terminal-doctor"
+if [[ ${TERMINAL_ENV_TEST_FONT_MUTATE:-0} == 1 ]]; then
+  fontdir="$HOME/.local/share/fonts"
+  mkdir -p "$fontdir" "$HOME/.local/state/terminal-env/fonts"
+  rm -f -- "$fontdir"/MonaspiceNeNerdFont-*.terminal-env-*.otf
+  printf 'new\n' > "$fontdir/MonaspiceNeNerdFont-Regular.terminal-env-new.otf"
+  printf 'new\n' > "$HOME/.local/state/terminal-env/fonts/version"
+fi
 CHEZMOI
 chmod +x "$HOME/.local/bin/chezmoi"
 ''')
     script.chmod(0o755)
+    plugin_script = root / 'scripts/build-zsh-plugins.sh'
+    plugin_script.write_text('#!/usr/bin/env bash\nset -Eeuo pipefail\nexit 0\n')
+    plugin_script.chmod(0o755)
 
 
 with tempfile.TemporaryDirectory(prefix='terminal-env-install-output-') as td:
@@ -135,6 +145,12 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-install-output-') as td:
     sentinel.parent.mkdir(parents=True)
     sentinel.write_text('before\n')
     (failed_home / '.terminal-env-doctor-fail').write_text('1\n')
+    failed_deja = failed_home / '.local/bin/deja'
+    failed_deja.parent.mkdir(parents=True, exist_ok=True)
+    failed_deja.write_text('legacy-managed-deja\n')
+    deja_marker = failed_home / '.local/state/terminal-env/deja-imported'
+    deja_marker.parent.mkdir(parents=True, exist_ok=True)
+    deja_marker.write_text('1\n')
     failed = run_install(
         fixture_root, failed_home,
         '--profile', 'minimal', '--no-shell-change', '--no-font', '--format=json', '--color=never'
@@ -146,8 +162,51 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-install-output-') as td:
     assert sentinel.read_text() == 'before\n'
     assert not (failed_home / '.config/zsh/installer-fixture').exists()
     assert not (failed_home / '.local/share/terminal-env/source').exists()
+    assert failed_deja.read_text() == 'legacy-managed-deja\n'
     complete = list((failed_home / '.local/state/terminal-env/backups/transactions').glob('*/.complete'))
     assert complete == []
+
+    font_home = base / 'font-failure-home'
+    old_font = font_home / '.local/share/fonts/MonaspiceNeNerdFont-Regular.terminal-env-old.otf'
+    old_font.parent.mkdir(parents=True)
+    old_font.write_text('old\n')
+    old_font_state = font_home / '.local/state/terminal-env/fonts/version'
+    old_font_state.parent.mkdir(parents=True)
+    old_font_state.write_text('old\n')
+    (font_home / '.terminal-env-doctor-fail').write_text('1\n')
+    font_failed = run_install(
+        fixture_root, font_home,
+        '--profile', 'workstation', '--no-shell-change', '--format=json', '--color=never',
+        extra_env={'TERMINAL_ENV_TEST_FONT_MUTATE': '1'},
+    )
+    assert font_failed.returncode != 0
+    assert old_font.read_text() == 'old\n'
+    assert not (font_home / '.local/share/fonts/MonaspiceNeNerdFont-Regular.terminal-env-new.otf').exists()
+    assert old_font_state.read_text() == 'old\n'
+
+    shell_home = base / 'shell-failure-home'
+    shell_home.mkdir()
+    (shell_home / '.terminal-env-doctor-fail').write_text('1\n')
+    shell_bin = base / 'shell-bin'
+    shell_bin.mkdir()
+    shell_marker = base / 'chsh-called'
+    fake_zsh = shell_bin / 'zsh'
+    fake_zsh.write_text('#!/usr/bin/env bash\nexit 0\n')
+    fake_zsh.chmod(0o755)
+    fake_chsh = shell_bin / 'chsh'
+    fake_chsh.write_text('#!/usr/bin/env bash\nprintf called > "$TERMINAL_ENV_TEST_CHSH_MARKER"\n')
+    fake_chsh.chmod(0o755)
+    shell_failed = run_install(
+        fixture_root, shell_home,
+        '--profile', 'workstation', '--no-font', '--format=json', '--color=never',
+        extra_env={
+            'PATH': str(shell_bin) + os.pathsep + os.environ['PATH'],
+            'SHELL': '/bin/bash',
+            'TERMINAL_ENV_TEST_CHSH_MARKER': str(shell_marker),
+        },
+    )
+    assert shell_failed.returncode != 0
+    assert not shell_marker.exists(), 'login shell changed before verification completed'
 
     success_home = base / 'success-home'
     success_home.mkdir()

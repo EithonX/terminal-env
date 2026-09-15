@@ -156,6 +156,7 @@ managed=(
   .local/bin/oh-my-posh .local/bin/atuin .local/bin/fzf .local/bin/zoxide .local/bin/chezmoi
   .local/share/terminal-env/source .local/share/terminal-env/zsh-plugins .cache/terminal-env
 )
+if [[ -f "$STATE/deja-imported" ]]; then managed+=(.local/bin/deja); fi
 rollback_dir=$(mktemp -d "${TMPDIR:-/tmp}/terminal-env-uninstall.XXXXXX")
 uninstall_active=0
 cleanup_uninstall_snapshot(){ rm -rf -- "$rollback_dir" 2>/dev/null || true; }
@@ -190,7 +191,7 @@ uninstall_active=1
 trap rollback_uninstall ERR
 
 for rel in "${managed[@]}"; do rm -rf -- "${HOME:?}/$rel"; done
-if [[ -f "$STATE/deja-imported" ]]; then pkill -f 'deja daemon' >/dev/null 2>&1 || true; rm -f -- "$HOME/.local/bin/deja" || true; fi
+if [[ -f "$STATE/deja-imported" ]]; then pkill -f 'deja daemon' >/dev/null 2>&1 || true; fi
 
 restored=0
 if (( restore_available )); then

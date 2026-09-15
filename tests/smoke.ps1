@@ -59,7 +59,7 @@ foreach ($file in $unixTextFiles) {
     }
 }
 
-foreach ($relativePath in 'dot_config\terminal-env\powershell\doctor.ps1','dot_config\terminal-env\powershell\deps.ps1','dot_config\terminal-env\powershell\update.ps1') {
+foreach ($relativePath in 'dot_config\terminal-env\powershell\doctor.ps1','dot_config\terminal-env\powershell\deps.ps1','dot_config\terminal-env\powershell\update.ps1','dot_config\terminal-env\powershell\terminal.ps1') {
     $scriptPath = Join-Path $root $relativePath
     $profileCollisions = @($asts[$scriptPath].FindAll({
         param($node)
@@ -123,6 +123,9 @@ function Assert-TerminalEnvOutputLines {
 $terminalPath=Join-Path $root 'dot_config\terminal-env\powershell\terminal.ps1'
 $terminalHelp=@(& $terminalPath '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalHelp -RequiredLines @('Usage','terminal <command> [options]') -Message 'Unified terminal root help is invalid'
+$terminalVersionJson=@(& $terminalPath 'version' '--format' 'json' '--color' 'never') -join "`n"
+$terminalVersionPayload=$terminalVersionJson|ConvertFrom-Json
+if($terminalVersionPayload.command -ne 'version' -or [string]::IsNullOrWhiteSpace([string]$terminalVersionPayload.profile)){throw 'Unified terminal version JSON contract is invalid'}
 $terminalDoctorHelp=@(& $terminalPath 'doctor' '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalDoctorHelp -RequiredLines @('Usage: terminal doctor [options]','terminal-doctor [options]') -Message 'Unified terminal doctor delegation failed'
 $terminalDepsCheckHelp=@(& $terminalPath 'deps' 'check' '--help')
@@ -140,6 +143,14 @@ $unifiedContextJson=@(& $terminalPath 'context' '--cwd' $root '--format' 'json')
 if([string]::IsNullOrWhiteSpace($unifiedContextJson)){throw 'Unified terminal context JSON output is empty'}
 $unifiedContextPayload=$unifiedContextJson|ConvertFrom-Json
 if($unifiedContextPayload.schema_version -ne 1 -or [string]::IsNullOrWhiteSpace([string]$unifiedContextPayload.cwd)){throw 'Unified terminal context JSON contract is invalid'}
+$pwshExecutable=(Get-Command pwsh -ErrorAction Stop).Source
+$directContextJson=@(& $pwshExecutable -NoLogo -NoProfile -File $terminalPath 'context' '--cwd' $root '--format' 'json') -join "`n"
+if($LASTEXITCODE -ne 0){throw "Unified terminal direct-process success returned exit code $LASTEXITCODE"}
+$directContextPayload=$directContextJson|ConvertFrom-Json
+if($directContextPayload.schema_version -ne 1){throw 'Unified terminal direct-process JSON contract is invalid'}
+$missingContextPath=Join-Path ([IO.Path]::GetTempPath()) ("terminal-env-missing-"+[guid]::NewGuid().ToString('N'))
+& $pwshExecutable -NoLogo -NoProfile -File $terminalPath 'context' '--cwd' $missingContextPath '--format' 'json' *> $null
+if($LASTEXITCODE -eq 0){throw 'Unified terminal direct-process failure returned exit code 0'}
 $profileTerminalFunctions=@($asts[(Join-Path $root 'dot_config\terminal-env\powershell\profile.ps1')].FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'terminal'},$true))
 if($profileTerminalFunctions.Count -ne 1){throw 'PowerShell profile does not expose unified terminal command'}
 $depsText = Get-Content -LiteralPath (Join-Path $root 'dot_config\terminal-env\powershell\deps.ps1') -Raw

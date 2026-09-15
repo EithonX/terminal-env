@@ -115,6 +115,10 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-uninstall-output-') as td:
     failure_managed = failure_home / '.config/terminal-env/managed.txt'
     failure_managed.parent.mkdir(parents=True, exist_ok=True)
     failure_managed.write_text('managed\n')
+    failure_deja = failure_home / '.local/bin/deja'
+    failure_deja.parent.mkdir(parents=True, exist_ok=True)
+    failure_deja.write_text('legacy-managed-deja\n')
+    (failure_home / '.local/state/terminal-env/deja-imported').write_text('1\n')
     fake_bin = base / 'fake-bin'
     fake_bin.mkdir()
     real_tar = shutil.which('tar')
@@ -136,6 +140,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-uninstall-output-') as td:
     assert failed.stdout == ''
     assert 'restoring the managed state that was active before the command' in failed.stderr
     assert failure_managed.read_text() == 'managed\n'
+    assert failure_deja.read_text() == 'legacy-managed-deja\n'
     assert (failure_home / '.local/state/terminal-env/original-backup').read_text().strip() == str(failure_backup)
 
     restore_home = base / 'restore-home'

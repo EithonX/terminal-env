@@ -25,6 +25,23 @@ function Resolve-TerminalEnvCommandScript {
     return $path
 }
 
+$script:TerminalEnvCommandExitCode = 0
+
+function Invoke-TerminalEnvDelegatedCommand {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name,
+        [string[]]$CommandArgs = @()
+    )
+    $path = Resolve-TerminalEnvCommandScript $Name
+    $global:LASTEXITCODE = 0
+    & $path @CommandArgs
+    $succeeded = $?
+    $childExitCode = $global:LASTEXITCODE
+    if ($childExitCode -is [int] -and $childExitCode -ne 0) { $script:TerminalEnvCommandExitCode = [int]$childExitCode }
+    elseif ($succeeded) { $script:TerminalEnvCommandExitCode = 0 }
+    else { $script:TerminalEnvCommandExitCode = 1 }
+}
+
 function Invoke-TerminalEnvVersionCommand {
     param([string[]]$CommandArgs)
     $format='human';$color='auto';$quiet=$false
@@ -58,7 +75,7 @@ Options:
     Initialize-TerminalEnvUI -Format $format -ColorMode $color
     $source=Join-Path $HOME '.local\share\terminal-env\source'
     $state=Join-Path $HOME '.local\state\terminal-env'
-    $profile=if(Test-Path -LiteralPath (Join-Path $state 'profile')){(Get-Content -LiteralPath (Join-Path $state 'profile') -Raw).Trim()}else{'unknown'}
+    $managedProfile=if(Test-Path -LiteralPath (Join-Path $state 'profile')){(Get-Content -LiteralPath (Join-Path $state 'profile') -Raw).Trim()}else{'unknown'}
     $revision='';$branch='';$sourceKind='static'
     $git=Get-Command git -ErrorAction SilentlyContinue
     if($git -and (Test-Path -LiteralPath (Join-Path $source '.git'))){
@@ -69,16 +86,16 @@ Options:
             if($LASTEXITCODE -ne 0){$branch=''}
         }else{$revision=''}
     }
-    $profile=Get-TerminalEnvSafeText $profile;$revision=Get-TerminalEnvSafeText $revision;$branch=Get-TerminalEnvSafeText $branch
+    $managedProfile=Get-TerminalEnvSafeText $managedProfile;$revision=Get-TerminalEnvSafeText $revision;$branch=Get-TerminalEnvSafeText $branch
     if($format -eq 'json'){
-        [pscustomobject]@{command='version';source_kind=$sourceKind;revision=$revision;branch=$branch;profile=$profile}|ConvertTo-Json -Compress
+        [pscustomobject]@{command='version';source_kind=$sourceKind;revision=$revision;branch=$branch;profile=$managedProfile}|ConvertTo-Json -Compress
     }elseif($format -eq 'plain'){
-        Write-Output "version`t$sourceKind`t$revision`t$branch`t$profile"
+        Write-Output "version`t$sourceKind`t$revision`t$branch`t$managedProfile"
     }else{
         Write-TerminalEnvTitle version
         Write-TerminalEnvRow Source $(if($revision){$revision.Substring(0,[Math]::Min(12,$revision.Length))}else{'static checkout'})
         if($branch){Write-TerminalEnvRow Branch $branch}
-        Write-TerminalEnvRow Profile $profile
+        Write-TerminalEnvRow Profile $managedProfile
     }
 }
 
@@ -113,11 +130,11 @@ function Invoke-TerminalEnvCommand {
                 if($rest.Count -gt 1){$tail=@($rest[1..($rest.Count-1)])}
                 $rest=@('status')+$tail
             }
-            & (Resolve-TerminalEnvCommandScript deps) @rest
+            Invoke-TerminalEnvDelegatedCommand -Name deps -CommandArgs $rest
             return
         }
         {$_ -in @('doctor','update','context','backup','rollback')} {
-            & (Resolve-TerminalEnvCommandScript $command) @rest
+            Invoke-TerminalEnvDelegatedCommand -Name $command -CommandArgs $rest
             return
         }
         default {throw "Unknown command: $command`nRun 'terminal --help' for usage."}
@@ -125,5 +142,9 @@ function Invoke-TerminalEnvCommand {
 }
 
 if($MyInvocation.InvocationName -ne '.'){
-    try{Invoke-TerminalEnvCommand -CommandArgs @($args)}catch{[Console]::Error.WriteLine($_.Exception.Message);exit 2}
+    try{
+        $script:TerminalEnvCommandExitCode = 0
+        Invoke-TerminalEnvCommand -CommandArgs @($args)
+        exit $script:TerminalEnvCommandExitCode
+    }catch{[Console]::Error.WriteLine($_.Exception.Message);exit 2}
 }
