@@ -44,7 +44,11 @@ if [[ -r $_autosuggest_plugin ]]; then
   # ghost text. This also avoids its CLI query path competing with completion.
   typeset -ga ZSH_AUTOSUGGEST_STRATEGY
   ZSH_AUTOSUGGEST_STRATEGY=(terminal_env_autosuggest)
-  ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#6c7986'
+  if [[ -n ${NO_COLOR:-} ]]; then
+    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='dim'
+  else
+    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#707c88'
+  fi
   ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=512
   source "$_autosuggest_plugin"
 

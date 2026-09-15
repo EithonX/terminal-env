@@ -1,29 +1,82 @@
 #!/usr/bin/env bash
 set -u
+
 quick=0
-usage(){ printf '%s\n' 'Usage: terminal-doctor [--quick]'; }
+format=human
+color=auto
+verbose=0
+quiet=0
+
+usage(){ cat <<'USAGE'
+Usage: terminal doctor [options]
+       terminal-doctor [options]
+
+Options:
+  --quick                 Skip slower checks.
+  --format human|plain|json
+  --color auto|always|never
+  --verbose               Show every successful check in human output.
+  --quiet                 Print nothing; use the exit status only.
+  -h, --help              Show this help.
+USAGE
+}
+
 while (($#)); do
   case "$1" in
     --quick) quick=1; shift ;;
+    --verbose) verbose=1; shift ;;
+    --quiet) quiet=1; shift ;;
+    --format)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --format.' >&2; exit 2; }
+      format=$2; shift 2 ;;
+    --format=*) format=${1#*=}; shift ;;
+    --color)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --color.' >&2; exit 2; }
+      color=$2; shift 2 ;;
+    --color=*) color=${1#*=}; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
-ok_n=0
+case "$format" in human|plain|json) ;; *) printf 'Invalid format: %s\n' "$format" >&2; exit 2 ;; esac
+case "$color" in auto|always|never) ;; *) printf 'Invalid color mode: %s\n' "$color" >&2; exit 2 ;; esac
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ui_lib="$script_dir/../lib/terminal-env/output.sh"
+[[ -r $ui_lib ]] || { printf 'Terminal Environment output library is missing: %s\n' "$ui_lib" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$ui_lib"
+te_ui_init "$format" "$color" || { printf 'Could not initialize output mode.\n' >&2; exit 2; }
+
+CHECK_ID=()
+CHECK_STATUS=()
+CHECK_SECTION=()
+CHECK_LABEL=()
+CHECK_VALUE=()
+CHECK_DETAIL=()
+CHECK_INVENTORY=()
+check_n=0
+pass_n=0
 warn_n=0
 fail_n=0
-if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
-  G=$'\e[38;5;79m'
-  Y=$'\e[38;5;214m'
-  R=$'\e[38;5;203m'
-  D=$'\e[2m'
-  X=$'\e[0m'
-else
-  G='' Y='' R='' D='' X=''
-fi
-pass(){ printf '%sPASS%s  %s\n' "$G" "$X" "$*"; ok_n=$((ok_n+1)); }
-warn(){ printf '%sWARN%s  %s\n' "$Y" "$X" "$*"; warn_n=$((warn_n+1)); }
-fail(){ printf '%sFAIL%s  %s\n' "$R" "$X" "$*"; fail_n=$((fail_n+1)); }
+
+add_check(){
+  local id=$1 status=$2 section=$3 label=$4 value=${5-} detail=${6-} inventory=${7:-0}
+  CHECK_ID[$check_n]=$(te_ui_clean_text "$id")
+  CHECK_STATUS[$check_n]=$status
+  CHECK_SECTION[$check_n]=$(te_ui_clean_text "$section")
+  CHECK_LABEL[$check_n]=$(te_ui_clean_text "$label")
+  CHECK_VALUE[$check_n]=$(te_ui_clean_text "$value")
+  CHECK_DETAIL[$check_n]=$(te_ui_clean_text "$detail")
+  CHECK_INVENTORY[$check_n]=$inventory
+  case "$status" in
+    pass) pass_n=$((pass_n+1)) ;;
+    warn) warn_n=$((warn_n+1)) ;;
+    fail) fail_n=$((fail_n+1)) ;;
+  esac
+  check_n=$((check_n+1))
+}
+
 have(){ command -v "$1" >/dev/null 2>&1; }
 human_bytes(){
   local n=${1:-0}
@@ -39,163 +92,270 @@ dir_bytes(){
   k=$(du -sk "$p" 2>/dev/null | awk '{print $1}')
   printf '%d' "$(( ${k:-0} * 1024 ))"
 }
-ver(){ command "$1" "${2:---version}" 2>/dev/null | head -n1; }
+tool_version(){
+  local line version
+  line=$(command "$1" --version 2>/dev/null | head -n1 || true)
+  version=$(printf '%s\n' "$line" | awk 'match($0, /[vV]?[0-9]+([.][0-9]+)+([.-][0-9A-Za-z]+)*/){print substr($0,RSTART,RLENGTH); exit}')
+  if [[ -n $version ]]; then printf '%s' "$version"; else printf '%s' "$line"; fi
+}
+
 state="$HOME/.local/state/terminal-env"
 source_tree="$HOME/.local/share/terminal-env/source"
 profile=$(cat "$state/profile" 2>/dev/null || printf unknown)
-printf 'Terminal Environment doctor\n\n%sprofile=%s shell=%s term=%s%s\n\n' "$D" "$profile" "${SHELL:-unknown}" "${TERM:-unknown}" "$X"
 
 if [[ -r "$state/original-backup" ]]; then
-  pass 'original pre-install restore point recorded'
+  add_check restore_point pass Safety 'Restore point' recorded
 else
-  warn 'original restore point is not recorded'
+  add_check restore_point warn Safety 'Restore point' missing 'original pre-install restore point is not recorded'
 fi
 
 backup_root="$state/backups"
 tx_root="$backup_root/transactions"
 manual_root="$backup_root/manual"
 tx_count=0
-for x in "$tx_root"/install-*; do
-  [[ -d $x ]] && tx_count=$((tx_count+1))
-done
+for x in "$tx_root"/install-*; do [[ -d $x ]] && tx_count=$((tx_count+1)); done
 manual_count=0
-for x in "$manual_root"/manual-*; do
-  [[ -f $x ]] && manual_count=$((manual_count+1))
-done
-pass "storage: ${tx_count:-0} retained transaction backup(s), $(human_bytes "$(dir_bytes "$tx_root")")"
-pass "manual backups: ${manual_count:-0}, $(human_bytes "$(dir_bytes "$manual_root")") (never auto-pruned)"
+for x in "$manual_root"/manual-*; do [[ -f $x ]] && manual_count=$((manual_count+1)); done
+add_check transaction_backups pass Safety 'Transaction backups' "$tx_count · $(human_bytes "$(dir_bytes "$tx_root")")"
+add_check manual_backups pass Safety 'Manual backups' "$manual_count · $(human_bytes "$(dir_bytes "$manual_root")")" 'never auto-pruned'
 
 if [[ -r "$state/fonts/current" ]]; then
   font_count=$(wc -l < "$state/fonts/current" | tr -d ' ')
   font_bytes=0
   while IFS= read -r fp; do
-    if [[ -f $fp ]]; then
-      font_bytes=$((font_bytes + $(wc -c < "$fp")))
-    fi
+    if [[ -f $fp ]]; then font_bytes=$((font_bytes + $(wc -c < "$fp"))); fi
   done < "$state/fonts/current"
-  pass "managed font set: ${font_count:-0} face(s), $(human_bytes "$font_bytes")"
+  add_check managed_fonts pass Tools 'Managed fonts' "${font_count:-0} faces · $(human_bytes "$font_bytes")"
 fi
 
-for c in zsh git oh-my-posh atuin fzf zoxide chezmoi; do
-  if have "$c"; then
-    pass "$c: $(ver "$c")"
+for spec in \
+  'zsh|Zsh|Shell|1' \
+  'git|Git|Shell|1' \
+  'oh-my-posh|Oh My Posh|Tools|1' \
+  'atuin|Atuin|Tools|1' \
+  'fzf|fzf|Tools|1' \
+  'zoxide|zoxide|Tools|1' \
+  'chezmoi|chezmoi|Tools|1'
+do
+  IFS='|' read -r cmd label section inventory <<< "$spec"
+  id=${cmd//-/_}
+  if have "$cmd"; then
+    add_check "$id" pass "$section" "$label" "$(tool_version "$cmd")" '' "$inventory"
   else
-    warn "$c is missing; related features will degrade gracefully"
+    add_check "$id" warn "$section" "$label" missing "$cmd is missing; related features will degrade gracefully" "$inventory"
   fi
 done
 
 if [[ $profile == server ]]; then
   if have tmux; then
-    pass "tmux: $(tmux -V 2>/dev/null)"
+    add_check tmux pass Tools tmux "$(tmux -V 2>/dev/null | awk '{print $2}')" '' 1
   else
-    warn 'tmux is missing from server profile'
+    add_check tmux warn Tools tmux missing 'tmux is missing from the server profile' 1
   fi
 fi
 
-if [[ -r "$HOME/.config/oh-my-posh/terminal.omp.json" ]]; then
+theme="$HOME/.config/oh-my-posh/terminal.omp.json"
+if [[ -r $theme ]]; then
   if have oh-my-posh; then
-    if oh-my-posh print primary --config "$HOME/.config/oh-my-posh/terminal.omp.json" --shell uni >/dev/null 2>&1; then
-      pass 'Oh My Posh theme renders'
+    if oh-my-posh print primary --config "$theme" --shell uni >/dev/null 2>&1; then
+      add_check omp_theme pass Configuration 'Oh My Posh theme' renders
     else
-      fail 'Oh My Posh theme could not be rendered'
+      add_check omp_theme fail Configuration 'Oh My Posh theme' invalid 'theme could not be rendered'
     fi
   elif have python3; then
-    if python3 -m json.tool "$HOME/.config/oh-my-posh/terminal.omp.json" >/dev/null 2>&1; then
-      pass 'Oh My Posh theme JSON parses'
+    if python3 -m json.tool "$theme" >/dev/null 2>&1; then
+      add_check omp_theme pass Configuration 'Oh My Posh theme' 'JSON parses'
     else
-      fail 'Oh My Posh theme JSON is invalid'
+      add_check omp_theme fail Configuration 'Oh My Posh theme' invalid 'theme JSON is invalid'
     fi
   else
-    warn 'Oh My Posh theme is present but no validator is available'
+    add_check omp_theme warn Configuration 'Oh My Posh theme' unverified 'theme is present but no validator is available'
   fi
 else
-  warn 'Oh My Posh theme is absent'
+  add_check omp_theme warn Configuration 'Oh My Posh theme' missing 'theme is absent'
 fi
 
-for f in \
-  "$HOME/.local/share/terminal-env/zsh-plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" \
-  "$HOME/.local/share/terminal-env/zsh-plugins/fzf-tab/fzf-tab.plugin.zsh" \
-  "$HOME/.local/share/terminal-env/zsh-plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+for spec in \
+  'zsh_autosuggestions|zsh-autosuggestions|zsh-autosuggestions.zsh' \
+  'fzf_tab|fzf-tab|fzf-tab.plugin.zsh' \
+  'zsh_syntax_highlighting|syntax-highlighting|zsh-syntax-highlighting.zsh'
 do
-  if [[ -r $f ]]; then
-    pass "plugin present: ${f##*/}"
+  IFS='|' read -r id label file <<< "$spec"
+  case "$id" in
+    zsh_autosuggestions) path="$HOME/.local/share/terminal-env/zsh-plugins/zsh-autosuggestions/$file" ;;
+    fzf_tab) path="$HOME/.local/share/terminal-env/zsh-plugins/fzf-tab/$file" ;;
+    *) path="$HOME/.local/share/terminal-env/zsh-plugins/zsh-syntax-highlighting/$file" ;;
+  esac
+  if [[ -r $path ]]; then
+    add_check "$id" pass Configuration "$label" present
   else
-    warn "plugin missing: $f"
+    add_check "$id" warn Configuration "$label" missing "plugin is missing: $path"
   fi
 done
 
 if [[ -d "$HOME/.local/share/terminal-env/zsh-plugins/zsh-completions/src" ]]; then
-  pass 'zsh-completions present'
+  add_check zsh_completions pass Configuration zsh-completions present
 else
-  warn 'zsh-completions missing'
+  add_check zsh_completions warn Configuration zsh-completions missing 'zsh-completions is missing'
 fi
 
 if have zsh; then
-  bad=0
-  while IFS= read -r -d '' f; do
-    if ! zsh -n "$f" >/dev/null 2>&1; then
-      fail "Zsh syntax: $f"
-      bad=1
-    fi
-  done < <(find "$HOME/.config/zsh" -type f -name '*.zsh' -print0 2>/dev/null)
-  if (( bad == 0 )); then pass 'Zsh configuration syntax parses'; fi
+  if [[ -d "$HOME/.config/zsh" ]]; then
+    bad=0
+    while IFS= read -r -d '' f; do
+      if ! zsh -n "$f" >/dev/null 2>&1; then
+        add_check zsh_syntax fail Configuration 'Zsh syntax' invalid "configuration does not parse: $f"
+        bad=1
+      fi
+    done < <(find "$HOME/.config/zsh" -type f -name '*.zsh' -print0 2>/dev/null)
+    (( bad == 0 )) && add_check zsh_syntax pass Configuration 'Zsh syntax' parses
+  else
+    add_check zsh_config warn Configuration 'Zsh configuration' missing 'managed Zsh configuration directory is absent'
+  fi
   if (( ! quick )); then
     insecure=$(zsh -dfc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true)
     if [[ -z $insecure ]]; then
-      pass 'Zsh completion paths pass compaudit'
+      add_check compaudit pass Configuration 'Completion paths' secure
     else
-      warn "Insecure completion paths: $insecure"
+      add_check compaudit warn Configuration 'Completion paths' insecure "insecure paths: $insecure"
     fi
   fi
 fi
 
 if have pgrep && pgrep -f 'deja daemon' >/dev/null 2>&1; then
   if [[ -f "$state/deja-imported" ]]; then
-    warn 'legacy managed Deja daemon is still running; terminal-deps sync will retire it'
+    add_check deja warn Environment Deja running 'legacy managed Deja daemon is still running; terminal deps sync will retire it'
   else
-    warn 'a non-managed Deja daemon is running; Terminal Environment will not remove it automatically'
+    add_check deja warn Environment Deja running 'a non-managed Deja daemon is running; Terminal Environment will not remove it automatically'
   fi
 fi
 
 if have atuin; then
   if atuin search --limit 1 --cmd-only "" >/dev/null 2>&1; then
-    pass 'Atuin local history database is readable'
+    add_check atuin_database pass Configuration 'Atuin database' readable
   else
-    warn 'Atuin history database check failed'
+    add_check atuin_database warn Configuration 'Atuin database' unreadable 'Atuin history database check failed'
   fi
 fi
 
 if [[ ${TERM:-} == dumb ]]; then
-  warn 'TERM=dumb: rich UI intentionally degrades'
+  add_check terminal_type warn Environment Terminal TERM=dumb 'rich UI intentionally degrades'
 else
-  pass "terminal type: ${TERM:-unknown}"
+  add_check terminal_type pass Environment Terminal "${TERM:-unknown}"
 fi
-
 if [[ -n ${COLORTERM:-} ]]; then
-  pass "color capability hint: $COLORTERM"
+  add_check color_capability pass Environment 'Color capability' "$COLORTERM"
 else
-  warn 'COLORTERM is unset; truecolor depends on the client terminal'
+  add_check color_capability warn Environment 'Color capability' unknown 'COLORTERM is unset; truecolor depends on the client terminal'
 fi
 
 if [[ -d "$source_tree/.git" ]]; then
-  pass 'installed source is Git-backed and updateable'
+  add_check git_source pass Safety 'Installed source' Git-backed
 else
-  warn 'installed source is not Git-backed; automatic source update is unavailable'
+  add_check git_source warn Safety 'Installed source' static 'installed source is not Git-backed; automatic source update is unavailable'
 fi
-
 if [[ -f "$state/deps-pending" ]]; then
-  warn 'source update changed dependency pins; run terminal-deps sync'
+  add_check deps_manifest warn Safety Dependencies pending 'source update changed dependency pins; run terminal deps sync'
 else
-  pass 'dependency manifest is synchronized with the last source apply'
+  add_check deps_manifest pass Safety Dependencies synchronized
 fi
 
 if (( ! quick )) && [[ -r "$source_tree/tests/smoke.sh" ]]; then
   if bash "$source_tree/tests/smoke.sh" --source-only >/dev/null 2>&1; then
-    pass 'installed source smoke tests pass'
+    add_check source_smoke pass Safety 'Installed source smoke' passes
   else
-    fail 'installed source smoke tests failed'
+    add_check source_smoke fail Safety 'Installed source smoke' failed 'installed source smoke tests failed'
   fi
 fi
 
-printf '\nSummary: %d pass, %d warning, %d failure\n' "$ok_n" "$warn_n" "$fail_n"
+render_attention(){
+  local i message
+  (( warn_n + fail_n > 0 )) || return
+  te_ui_section Attention
+  for ((i=0; i<check_n; i++)); do
+    [[ ${CHECK_STATUS[$i]} == pass ]] && continue
+    message=${CHECK_DETAIL[$i]}
+    [[ -n $message ]] || message=${CHECK_VALUE[$i]}
+    te_ui_attention "${CHECK_STATUS[$i]}" "${CHECK_LABEL[$i]}" "$message"
+  done
+}
+
+render_human(){
+  local i section shown issue_n tone summary shell_name
+  (( quiet )) && return
+  te_ui_title doctor
+  if (( warn_n == 0 && fail_n == 0 && ! verbose )); then
+    te_ui_outcome success "Healthy · $check_n checks"
+    return
+  fi
+
+  if (( verbose )); then
+    shell_value=${SHELL:-unknown}; shell_name=${shell_value##*/}; [[ -n $shell_name ]] || shell_name=unknown
+    te_ui_meta "$profile · $shell_name · ${TERM:-unknown}"
+    for section in Shell Tools Safety Configuration Environment; do
+      shown=0
+      for ((i=0; i<check_n; i++)); do
+        [[ ${CHECK_STATUS[$i]} == pass && ${CHECK_SECTION[$i]} == "$section" ]] || continue
+        if (( shown == 0 )); then te_ui_section "$section"; shown=1; fi
+        te_ui_row "${CHECK_LABEL[$i]}" "${CHECK_VALUE[$i]}"
+      done
+    done
+  else
+    for section in Shell Tools; do
+      shown=0
+      for ((i=0; i<check_n; i++)); do
+        [[ ${CHECK_STATUS[$i]} == pass && ${CHECK_SECTION[$i]} == "$section" && ${CHECK_INVENTORY[$i]} == 1 ]] || continue
+        if (( shown == 0 )); then te_ui_section "$section"; shown=1; fi
+        te_ui_row "${CHECK_LABEL[$i]}" "${CHECK_VALUE[$i]}"
+      done
+    done
+  fi
+
+  render_attention
+  issue_n=$((warn_n+fail_n))
+  if (( fail_n > 0 )); then tone=danger; summary="$check_n checks · $warn_n warnings · $fail_n failures"
+  elif (( issue_n > 0 )); then tone=warning; summary="$check_n checks · $issue_n need attention"
+  else tone=success; summary="$check_n checks · healthy"
+  fi
+  te_ui_outcome "$tone" "$summary"
+}
+
+render_plain(){
+  local i
+  (( quiet )) && return
+  printf 'meta\tprofile\t%s\n' "$(te_ui_clean_text "$profile")"
+  printf 'meta\tquick\t%s\n' "$quick"
+  for ((i=0; i<check_n; i++)); do
+    printf 'check\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "${CHECK_STATUS[$i]}" "${CHECK_ID[$i]}" "${CHECK_SECTION[$i]}" \
+      "${CHECK_LABEL[$i]}" "${CHECK_VALUE[$i]}" "${CHECK_DETAIL[$i]}"
+  done
+  printf 'summary\t%d\t%d\t%d\t%d\n' "$check_n" "$pass_n" "$warn_n" "$fail_n"
+}
+
+render_json(){
+  local i comma quick_json
+  (( quiet )) && return
+  if (( quick )); then quick_json=true; else quick_json=false; fi
+  printf '{"command":"doctor","profile":%s,"quick":%s,' "$(te_ui_json_string "$(te_ui_clean_text "$profile")")" "$quick_json"
+  printf '"summary":{"checks":%d,"pass":%d,"warning":%d,"failure":%d},"checks":[' "$check_n" "$pass_n" "$warn_n" "$fail_n"
+  comma=''
+  for ((i=0; i<check_n; i++)); do
+    printf '%s{' "$comma"
+    printf '"id":%s,' "$(te_ui_json_string "${CHECK_ID[$i]}")"
+    printf '"status":%s,' "$(te_ui_json_string "${CHECK_STATUS[$i]}")"
+    printf '"section":%s,' "$(te_ui_json_string "${CHECK_SECTION[$i]}")"
+    printf '"label":%s,' "$(te_ui_json_string "${CHECK_LABEL[$i]}")"
+    printf '"value":%s,' "$(te_ui_json_string "${CHECK_VALUE[$i]}")"
+    printf '"detail":%s}' "$(te_ui_json_string "${CHECK_DETAIL[$i]}")"
+    comma=','
+  done
+  printf ']}\n'
+}
+
+case "$format" in
+  human) render_human ;;
+  plain) render_plain ;;
+  json) render_json ;;
+esac
 (( fail_n == 0 ))

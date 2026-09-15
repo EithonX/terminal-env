@@ -4,9 +4,13 @@ param(
     [switch]$DryRun,
     [switch]$NoFont,
     [switch]$NoTerminalConfig,
-    [switch]$Force
+    [switch]$Force,
+    [ValidateSet('human','plain','json')][string]$Format = 'human',
+    [ValidateSet('auto','always','never')][string]$Color = 'auto',
+    [switch]$Quiet
 )
 $ErrorActionPreference = 'Stop'
+if($Quiet -and $PSBoundParameters.ContainsKey('Verbose')){throw '-Quiet and -Verbose cannot be used together.'}
 if($env:OS -ne 'Windows_NT'){ throw 'install.ps1 supports Windows only. Use install.sh on macOS or Linux.' }
 if([Environment]::OSVersion.Version.Build -lt 17763){ throw 'Windows 10 version 1809 (build 17763) or newer is required.' }
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -68,16 +72,34 @@ function Resolve-PowerShell7 {
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     $pwsh=Resolve-PowerShell7
     if(-not $pwsh){
-        if ($DryRun) { Write-Host 'Would install PowerShell 7 and reinvoke the installer.' -ForegroundColor Cyan; exit 0 }
+        if ($DryRun) {
+            if(-not $Quiet){
+                if($Format -eq 'json'){
+                    [pscustomobject]@{command='install';status='dry-run';phase='bootstrap';profile=$Profile;dry_run=$true;requires='PowerShell 7'} | ConvertTo-Json -Compress
+                }elseif($Format -eq 'plain'){
+                    Write-Output "install`tdry-run`tbootstrap`t$Profile`tPowerShell 7"
+                }else{
+                    Write-Output 'Terminal Environment · install'
+                    Write-Output ''
+                    Write-Output 'Preflight'
+                    Write-Output '  PowerShell 7      required'
+                    Write-Output ''
+                    Write-Output 'Dry run complete · PowerShell 7 would be installed first'
+                }
+            }
+            exit 0
+        }
         $winget=Resolve-WinGet -Repair
-        Write-Host 'Installing PowerShell 7 before continuing...' -ForegroundColor Cyan
-        & $winget install --id Microsoft.PowerShell --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-        if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 installation failed.' }
+        if(-not $Quiet){[Console]::Error.WriteLine('Preparing PowerShell 7...')}
+        $bootstrapOutput=@(& $winget install --id Microsoft.PowerShell --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1)
+        $bootstrapExit=$LASTEXITCODE
+        if($PSBoundParameters.ContainsKey('Verbose') -and -not $Quiet){foreach($line in $bootstrapOutput){[Console]::Error.WriteLine([string]$line)}}
+        if ($bootstrapExit -ne 0) { throw 'PowerShell 7 installation failed.' }
         $pwsh=Resolve-PowerShell7
         if(-not $pwsh){ throw 'PowerShell 7 installed but pwsh.exe could not be resolved.' }
     }
-    $forward=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Profile',$Profile)
-    if($DryRun){$forward+='-DryRun'}; if($NoFont){$forward+='-NoFont'}; if($NoTerminalConfig){$forward+='-NoTerminalConfig'}; if($Force){$forward+='-Force'}
+    $forward=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Profile',$Profile,'-Format',$Format,'-Color',$Color)
+    if($DryRun){$forward+='-DryRun'}; if($NoFont){$forward+='-NoFont'}; if($NoTerminalConfig){$forward+='-NoTerminalConfig'}; if($Force){$forward+='-Force'}; if($Quiet){$forward+='-Quiet'}; if($PSBoundParameters.ContainsKey('Verbose')){$forward+='-Verbose'}
     & $pwsh @forward; exit $LASTEXITCODE
 }
 if ($Profile -eq 'auto') { $Profile='workstation' }
@@ -94,10 +116,41 @@ $PreviousLastBackup = if(Test-Path (Join-Path $State 'last-install-backup')){(Ge
 $Config = Join-Path $HOME '.config\terminal-env\chezmoi.toml'
 $SameSource = ([IO.Path]::GetFullPath($Root).TrimEnd('\') -eq [IO.Path]::GetFullPath($Source).TrimEnd('\'))
 $InstallActive = $false
+$UiPath=Join-Path $Root 'dot_config\terminal-env\powershell\output.ps1'
+if(-not(Test-Path -LiteralPath $UiPath -PathType Leaf)){throw "Terminal Environment output library is missing: $UiPath"}
+. $UiPath
+Initialize-TerminalEnvUI -Format $Format -ColorMode $Color
+$script:InstallVerbose=$PSBoundParameters.ContainsKey('Verbose')
+if(-not $script:InstallVerbose){$ProgressPreference='SilentlyContinue'}
 
-function Info([string]$s) { Write-Host "  $s" -ForegroundColor Cyan }
-function Good([string]$s) { Write-Host "  $s" -ForegroundColor Green }
-function Warn([string]$s) { Write-Warning $s }
+function Write-InstallProgress([string]$Text) {
+    if($Quiet -or -not $script:InstallVerbose){return}
+    [Console]::Error.WriteLine((Get-TerminalEnvSafeText $Text))
+}
+function Info([string]$s) { Write-InstallProgress $s }
+function Warn([string]$s) { [Console]::Error.WriteLine("Warning: $(Get-TerminalEnvSafeText $s)") }
+function Write-InstallStage([string]$Name) {
+    if(-not $Quiet -and $Format -eq 'human'){Write-TerminalEnvSection $Name}
+}
+function Write-InstallResult([string]$Status) {
+    if($Quiet){return}
+    $nextAction=if($Profile -eq 'workstation' -and -not $NoTerminalConfig){'Open a new Windows Terminal tab using the Terminal Environment profile.'}else{'Open a new PowerShell 7 session.'}
+    $backupValue=if($Status -eq 'installed'){Get-TerminalEnvSafeText $Backup}else{$null}
+    if($Format -eq 'json'){
+        [pscustomobject]@{
+            command='install';status=$Status;profile=Get-TerminalEnvSafeText $Profile;platform='Windows';arch=Get-TerminalEnvSafeText $osArch
+            dry_run=[bool]$DryRun;transaction_backup=$backupValue;next_action=$nextAction
+        } | ConvertTo-Json -Compress
+    }elseif($Format -eq 'plain'){
+        Write-Output "install`t$Status`t$(Get-TerminalEnvSafeText $Profile)`tWindows`t$(Get-TerminalEnvSafeText $osArch)`t$backupValue"
+    }elseif($Status -eq 'dry-run'){
+        Write-TerminalEnvOutcome accent 'Dry run complete · no files were changed'
+    }else{
+        Write-TerminalEnvOutcome success "Installed · $Profile"
+        Write-TerminalEnvMeta "Transaction backup: $Backup"
+        Write-TerminalEnvMeta $nextAction
+    }
+}
 function Ensure-Directory([string]$p) { if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $p | Out-Null } }
 function Prune-TransactionBackups([int]$Keep=3) {
     $root=Join-Path $State 'backups\transactions'
@@ -269,8 +322,10 @@ function Install-Winget([string]$Id,[string]$Command,[switch]$Required) {
     if(-not $winget){ if($Required){ throw 'winget is required on Windows 10/11.' }; Warn "winget unavailable; skipped $Id"; return }
     $listed=(& $winget list --id $Id --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
     if($LASTEXITCODE -eq 0 -and $listed -match [regex]::Escape($Id)){ return }
-    & $winget install --id $Id --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if($LASTEXITCODE -ne 0){ if($Required){ throw "Failed to install $Id" } else { Warn "Optional package failed: $Id" } }
+    $installOutput=@(& $winget install --id $Id --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1)
+    $installExit=$LASTEXITCODE
+    if($script:InstallVerbose -and -not $Quiet){foreach($line in $installOutput){[Console]::Error.WriteLine([string]$line)}}
+    if($installExit -ne 0){ if($Required){ throw "Failed to install $Id" } else { Warn "Optional package failed: $Id" } }
 }
 function Get-GitHubAsset([string]$Repo,[string]$Tag,[string]$Name,[string]$Out) {
     $downloadHeaders=@{ 'User-Agent'='terminal-env-installer' }
@@ -366,9 +421,25 @@ function Restore-Transaction {
     Cleanup-FailedTransaction $Backup
 }
 
+if(-not $Quiet -and $Format -eq 'human'){
+    Write-TerminalEnvTitle install
+    Write-TerminalEnvMeta "$Profile · Windows $([Environment]::OSVersion.Version) · $osArch"
+    Write-InstallStage Preflight
+}
+if((Test-Path -LiteralPath $Source) -and -not $SameSource -and -not $Force -and -not(Test-Path -LiteralPath (Join-Path $Source '.terminal-env-source'))){
+    throw "$Source exists and is not managed by Terminal Environment. Use -Force only if you intend to replace it."
+}
+if(-not $Quiet -and $Format -eq 'human'){
+    Write-TerminalEnvRow Platform "Windows · $osArch"
+    Write-TerminalEnvRow Profile $Profile
+    Write-InstallStage Plan
+    Write-TerminalEnvRow Mode $(if($DryRun){'dry run'}else{'transactional apply'})
+    Write-TerminalEnvRow 'Terminal profile' $(if($Profile -eq 'workstation' -and -not $NoTerminalConfig){'managed Windows Terminal fragment'}else{'unchanged'})
+    Write-TerminalEnvRow Fonts $(if($Profile -eq 'workstation' -and -not $NoFont){'Monaspice Neon NF · 4 faces'}else{'skipped'})
+}
+
 try {
-    Write-Host 'Terminal Environment installer' -ForegroundColor White
-    Info "Profile: $Profile | Windows $([Environment]::OSVersion.Version)"
+    if(-not $DryRun){Write-InstallStage Apply}
     Ensure-Directory $State; Ensure-Directory $Backup; Ensure-Directory $Bin; Ensure-Directory (Split-Path $Config)
     if(-not $DryRun){
         Backup-Path (Join-Path $HOME '.config\terminal-env')
@@ -412,7 +483,7 @@ try {
 
     # Deploy a dedicated chezmoi source so existing dotfile managers are untouched.
     if(-not $DryRun){
-        if((Test-Path $Source) -and -not $Force -and -not (Test-Path (Join-Path $Source '.terminal-env-source'))){ throw "$Source already exists and is not ours; use -Force only if safe." }
+        if((Test-Path $Source) -and -not $Force -and -not (Test-Path (Join-Path $Source '.terminal-env-source'))){ throw "$Source exists and is not managed by Terminal Environment. Use -Force only if you intend to replace it." }
         if(-not $SameSource){
         $new="$Source.new.$PID"; Remove-Item -Recurse -Force $new -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force -Path $new | Out-Null
         Get-ChildItem -Force $Root | Where-Object Name -ne '.git' | Copy-Item -Destination $new -Recurse -Force
@@ -422,7 +493,10 @@ try {
         }
         Set-Content -LiteralPath $Config -Value "[data]`nprofile = `"$Profile`"`n" -Encoding utf8NoBOM -NoNewline
         $env:PATH="$Bin;$env:PATH"
-        & (Join-Path $Bin 'chezmoi.exe') --source $Source --config $Config apply --force
+        $applyOutput=@(& (Join-Path $Bin 'chezmoi.exe') --source $Source --config $Config apply --force 2>&1)
+        $applyExit=$LASTEXITCODE
+        if($script:InstallVerbose -and -not $Quiet){foreach($line in $applyOutput){[Console]::Error.WriteLine([string]$line)}}
+        if($applyExit -ne 0){throw 'chezmoi apply failed.'}
         $atuinMarker=Join-Path $State 'atuin-imported'
         if((Test-Path (Join-Path $Bin 'atuin.exe')) -and -not(Test-Path $atuinMarker)){
             try { & (Join-Path $Bin 'atuin.exe') import powershell | Out-Null; if($LASTEXITCODE -eq 0){ New-Item -ItemType File -Force $atuinMarker | Out-Null } } catch { Warn 'Existing PowerShell history could not be imported into Atuin; it can be imported later.' }
@@ -475,12 +549,29 @@ try {
     }
 
     if($DryRun){
-        Good 'Dry run complete; no files were changed.'
+        Write-InstallStage Finish
+        Write-InstallResult 'dry-run'
     } else {
+        Write-InstallStage Verify
+        $terminalPath=Join-Path $HOME '.config\terminal-env\powershell\terminal.ps1'
+        if(-not(Test-Path -LiteralPath $terminalPath -PathType Leaf)){throw 'Managed terminal command was not installed.'}
+        $doctorPath=Join-Path $HOME '.config\terminal-env\powershell\doctor.ps1'
+        if(-not(Test-Path -LiteralPath $doctorPath -PathType Leaf)){throw 'Managed terminal-doctor was not installed.'}
+        & $doctorPath '--quick' '--quiet'
+        $doctorOk=$?
+        if(-not $doctorOk){throw 'terminal-doctor verification failed.'}
+        if($Profile -ne 'minimal'){
+            $depsPath=Join-Path $HOME '.config\terminal-env\powershell\deps.ps1'
+            if(-not(Test-Path -LiteralPath $depsPath -PathType Leaf)){throw 'Managed terminal-deps was not installed.'}
+            & $depsPath 'status' '--quiet'
+            $depsOk=$?
+            if(-not $depsOk){throw 'terminal-deps verification failed.'}
+        }
         New-Item -ItemType File -Force -Path (Join-Path $Backup '.complete') | Out-Null
         Prune-TransactionBackups 3
-        Good "Installation complete. Transaction backup: $Backup"
-        if($Profile -eq 'workstation' -and -not $NoTerminalConfig){ Write-Host 'Open a new Windows Terminal tab using the Terminal Environment profile.' } else { Write-Host 'Open a new PowerShell 7 session.' }
+        $InstallActive = $false
+        Write-InstallStage Finish
+        Write-InstallResult 'installed'
     }
     $InstallActive = $false
 } catch {

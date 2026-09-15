@@ -1,0 +1,13 @@
+{
+  "bg": "#0A0E13",
+  "surface": "#151B22",
+  "surface_active": "#1B232D",
+  "line": "#28323D",
+  "text": "#E6EBF0",
+  "soft": "#A2ACB7",
+  "muted": "#707C88",
+  "accent": "#7CC4E4",
+  "warning": "#D6A85F",
+  "danger": "#E07880",
+  "success": "#8BB594"
+}

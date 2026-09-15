@@ -6,18 +6,22 @@ fail=0
 bad(){ echo "FAIL: $*" >&2; fail=1; }
 check(){ "$@" || bad "$*"; }
 check bash -n "$ROOT/bootstrap.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh"
-while IFS= read -r -d '' f; do check bash -n "$f"; done < <(find "$ROOT/scripts" "$ROOT/dot_local/bin" -type f -print0)
+while IFS= read -r -d '' f; do check bash -n "$f"; done < <(find "$ROOT/scripts" "$ROOT/dot_local/bin" "$ROOT/dot_local/lib" -type f -print0)
 check bash "$ROOT/bootstrap.sh" --help >/dev/null
 if bash "$ROOT/bootstrap.sh" --terminal-env-invalid-option >/dev/null 2>&1; then bad 'bootstrap.sh accepts unknown options'; fi
+bash "$ROOT/bootstrap.sh" --format json --color never --quiet --help >/dev/null 2>&1 || bad 'bootstrap.sh rejects installer output options'
+if bash "$ROOT/bootstrap.sh" --format xml >/dev/null 2>&1; then bad 'bootstrap.sh accepts invalid output format'; fi
 if bash "$ROOT/bootstrap.sh" --branch ../bad >/dev/null 2>&1; then bad 'bootstrap.sh accepts unsafe branch names'; fi
 cli_home=$(mktemp -d)
 trap 'rm -rf "$cli_home"' EXIT
 mkdir -p "$cli_home/.local/share/terminal-env/source"
 cp "$ROOT/versions.env" "$cli_home/.local/share/terminal-env/source/versions.env"
-for cmd in terminal-backup terminal-deps terminal-doctor terminal-rollback terminal-update; do
+for cmd in terminal-backup terminal-context terminal-deps terminal-doctor terminal-rollback terminal-update; do
   HOME="$cli_home" bash "$ROOT/dot_local/bin/executable_$cmd" --help >/dev/null 2>&1 || bad "$cmd --help"
   if HOME="$cli_home" bash "$ROOT/dot_local/bin/executable_$cmd" --terminal-env-invalid-option >/dev/null 2>&1; then bad "$cmd accepts unknown options"; fi
 done
+HOME="$cli_home" bash "$ROOT/dot_local/bin/executable_terminal" --help >/dev/null 2>&1 || bad 'terminal --help'
+if HOME="$cli_home" bash "$ROOT/dot_local/bin/executable_terminal" terminal-env-invalid-command >/dev/null 2>&1; then bad 'terminal accepts unknown commands'; fi
 
 # Regression coverage for helpers that run under `set -u`. Keep dependent
 # assignments out of a single `local` statement: Bash expands the RHS before
@@ -41,6 +45,18 @@ done
 ( HOME=$(mktemp -d) DRY_RUN=1 bash "$ROOT/scripts/build-zsh-plugins.sh" >/dev/null ) || bad 'nounset-safe plugin provisioning'
 python3 -m json.tool "$ROOT/dot_config/oh-my-posh/terminal.omp.json" >/dev/null || bad 'Oh My Posh JSON'
 python3 -m json.tool "$ROOT/dot_config/windows-terminal/terminal-env.json" >/dev/null || bad 'Windows Terminal JSON'
+python3 "$ROOT/tests/visual_foundation.py" >/dev/null || bad 'visual foundation invariants'
+python3 "$ROOT/tests/output_contract.py" >/dev/null || bad 'shared output contract'
+python3 "$ROOT/tests/context_resolver.py" >/dev/null || bad 'context resolver behavior'
+python3 "$ROOT/tests/doctor_output.py" >/dev/null || bad 'doctor output behavior'
+python3 "$ROOT/tests/deps_output.py" >/dev/null || bad 'dependency output behavior'
+python3 "$ROOT/tests/update_output.py" >/dev/null || bad 'update output behavior'
+python3 "$ROOT/tests/backup_output.py" >/dev/null || bad 'backup output behavior'
+python3 "$ROOT/tests/rollback_output.py" >/dev/null || bad 'rollback output behavior'
+python3 "$ROOT/tests/installer_output.py" >/dev/null || bad 'installer output behavior'
+python3 "$ROOT/tests/uninstall_output.py" >/dev/null || bad 'uninstall output behavior'
+python3 "$ROOT/tests/terminal_cli.py" >/dev/null || bad 'unified terminal CLI behavior'
+python3 "$ROOT/tests/docs_quality.py" >/dev/null || bad 'documentation quality'
 ROOT_FOR_PY="$ROOT" python3 - <<'PY' || bad 'configuration invariants'
 import json, os, pathlib, re
 r=pathlib.Path(os.environ['ROOT_FOR_PY'])
@@ -56,9 +72,12 @@ assert ('ANTIDOTE'+'_VERSION=') not in v
 # chezmoi executable_ is a regular-file attribute, not a directory attribute.
 # Helpers must live under dot_local/bin/executable_<name>.
 assert not (r/'executable_dot_local').exists()
+unified = r/'dot_local/bin/executable_terminal'
+assert unified.is_file() and unified.read_text().startswith('#!/usr/bin/env bash')
 helpers = sorted((r/'dot_local/bin').glob('executable_terminal-*'))
 assert [p.name for p in helpers] == [
     'executable_terminal-backup',
+    'executable_terminal-context',
     'executable_terminal-deps',
     'executable_terminal-doctor',
     'executable_terminal-rollback',
@@ -66,6 +85,8 @@ assert [p.name for p in helpers] == [
 ]
 for p in helpers:
     assert p.read_text().startswith('#!/usr/bin/env bash')
+ignore=(r/'.chezmoiignore.tmpl').read_text()
+assert '.local/bin/terminal\n.local/bin/terminal-*' in ignore
 # Prompt should stay compact, transcript-friendly and one-line.
 assert 'transient_prompt' not in t
 blob = json.dumps(t, ensure_ascii=False)
@@ -93,7 +114,7 @@ keys=(r/'dot_config/zsh/conf.d/70-keybindings.zsh').read_text()
 for seq,widget in (("^[[C","forward-char"),("^[OC","forward-char"),("^[[D","backward-char"),("^[OD","backward-char"),("^[[1;5C","forward-word"),("^[[1;5D","backward-word")):
     assert f"bindkey '{seq}' {widget}" in keys
 prompt=(r/'dot_config/zsh/conf.d/90-prompt.zsh').read_text()
-assert 'EUID == 0' in prompt and 'ROOT' not in prompt and '%F{203}#%f' in prompt
+assert 'EUID == 0' in prompt and 'ROOT' not in prompt and '%F{#e07880}#%f' in prompt
 psprofile=(r/'dot_config/terminal-env/powershell/profile.ps1').read_text()
 assert 'RightArrow -Function ForwardChar' in psprofile
 assert 'Ctrl+RightArrow -Function ForwardWord' in psprofile
@@ -196,6 +217,59 @@ if command -v zsh >/dev/null 2>&1; then
     _zsh_autosuggest_strategy_terminal_env_autosuggest $'"'"'echo a\necho b'"'"'
     [[ $suggestion == H:* ]] || exit 14
   ' || bad 'context-aware autosuggestion strategy'
+  ROOT_FOR_ZSH="$ROOT" zsh -dfc '
+    export XDG_CACHE_HOME=$(mktemp -d)
+    trap "rm -rf $XDG_CACHE_HOME" EXIT
+    export TERM=xterm-256color
+    unset NO_COLOR FZF_DEFAULT_OPTS
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/40-tools.zsh"
+    [[ $FZF_DEFAULT_OPTS == *--style=minimal* ]] || exit 21
+    [[ $FZF_DEFAULT_OPTS != *--border=rounded* ]] || exit 22
+    [[ $FZF_DEFAULT_OPTS == *--color=bg+:#151b22* ]] || exit 23
+  ' || bad 'fzf visual defaults'
+  ROOT_FOR_ZSH="$ROOT" zsh -dfc '
+    export XDG_CACHE_HOME=$(mktemp -d)
+    trap "rm -rf $XDG_CACHE_HOME" EXIT
+    export TERM=xterm-256color NO_COLOR=1
+    unset FZF_DEFAULT_OPTS
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/40-tools.zsh"
+    [[ $FZF_DEFAULT_OPTS == *--no-color* ]] || exit 24
+    [[ $FZF_DEFAULT_OPTS != *--color=* ]] || exit 25
+    export LS_COLORS=sentinel
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/25-colors.zsh"
+    [[ -z ${LS_COLORS+x} ]] || exit 26
+  ' || bad 'NO_COLOR shell behavior'
+  ROOT_FOR_ZSH="$ROOT" zsh -dfc '
+    export XDG_CACHE_HOME=$(mktemp -d)
+    trap "rm -rf $XDG_CACHE_HOME" EXIT
+    export TERM=xterm-256color
+    unset NO_COLOR
+    typeset -gA ZSH_HIGHLIGHT_STYLES
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/99-highlighting.zsh"
+    [[ ${ZSH_HIGHLIGHT_STYLES[command]} == "fg=#7cc4e4,bold" ]] || exit 27
+    [[ ${ZSH_HIGHLIGHT_STYLES[single-quoted-argument]} == "fg=#e6ebf0" ]] || exit 28
+    [[ ${ZSH_HIGHLIGHT_STYLES[redirection]} == "fg=#707c88" ]] || exit 29
+  ' || bad 'tonal Zsh highlighting'
+  ROOT_FOR_ZSH="$ROOT" zsh -dfc '
+    export TERM=dumb NO_COLOR=1 SSH_CONNECTION=fixture
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/90-prompt.zsh"
+    [[ $PROMPT != *"%F{"* ]] || exit 30
+    [[ $PROMPT == *"%m  %~ │ "* ]] || exit 31
+  ' || bad 'plain fallback prompt'
+  ROOT_FOR_ZSH="$ROOT" zsh -dfc '
+    export HOME=$(mktemp -d) TERM=dumb NO_COLOR=1
+    trap "rm -rf $HOME" EXIT
+    mkdir -p "$HOME/.local/bin"
+    cat > "$HOME/.local/bin/terminal-context" <<"EOF"
+#!/bin/sh
+printf "warning\tnode 24 ≠ 22 · 100%%\n"
+EOF
+    chmod +x "$HOME/.local/bin/terminal-context"
+    source "$ROOT_FOR_ZSH/dot_config/zsh/conf.d/90-prompt.zsh"
+    [[ $TERMINAL_ENV_PROJECT_CONTEXT == "node 24 ≠ 22 · 100%" ]] || exit 32
+    [[ $PROMPT == *"node 24 ≠ 22 · 100%%"* ]] || exit 33
+    [[ $PROMPT != *"%F{"* ]] || exit 34
+  ' || bad 'fallback prompt project context'
 fi
 (( source_only )) || echo "smoke: $([[ $fail == 0 ]] && echo PASS || echo FAIL)"
 exit "$fail"

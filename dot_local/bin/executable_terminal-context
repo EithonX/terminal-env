@@ -1,0 +1,782 @@
+#!/usr/bin/env bash
+set -u
+
+format=human
+cwd=$PWD
+usage(){ cat <<'USAGE'
+Usage: terminal context [options]
+       terminal-context [options]
+
+Options:
+  --cwd PATH               Resolve context for PATH instead of the current directory.
+  --format human|plain|json
+  -h, --help               Show this help.
+USAGE
+}
+while (($#)); do
+  case "$1" in
+    --format)
+      [[ $# -ge 2 ]] || { echo 'Missing value for --format' >&2; usage >&2; exit 2; }
+      format=$2; shift 2 ;;
+    --cwd)
+      [[ $# -ge 2 ]] || { echo 'Missing value for --cwd' >&2; usage >&2; exit 2; }
+      cwd=$2; shift 2 ;;
+    --prompt-record) format=prompt-record; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$format" in human|plain|json|prompt-record) ;; *) echo "Unknown format: $format" >&2; exit 2 ;; esac
+[[ -d $cwd ]] || { echo "Not a directory: $cwd" >&2; exit 2; }
+CWD=$(cd -- "$cwd" 2>/dev/null && pwd -P) || { echo "Cannot resolve directory: $cwd" >&2; exit 2; }
+
+trim(){
+  local s=${1-}
+  s=${s#"${s%%[![:space:]]*}"}
+  s=${s%"${s##*[![:space:]]}"}
+  printf '%s' "$s"
+}
+first_value_line(){
+  local file=$1 line
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%$'\r'}
+    line=$(trim "$line")
+    [[ -z $line || ${line:0:1} == '#' ]] && continue
+    printf '%s' "$line"
+    return 0
+  done < "$file"
+  return 1
+}
+metadata_value_safe(){
+  local s=${1-}
+  [[ -n $s && ${#s} -le 256 && ! $s =~ [[:cntrl:]] ]]
+}
+display_safe(){
+  local s=${1-} out='' c i
+  for ((i=0;i<${#s};i++)); do
+    c=${s:i:1}
+    if [[ $c =~ [[:cntrl:]] ]]; then out+='?'; else out+=$c; fi
+  done
+  printf '%s' "$out"
+}
+json_escape(){
+  local s=${1-} code oct ch escaped
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  for code in {1..31}; do
+    printf -v oct '%03o' "$code"
+    printf -v ch '%b' "\\$oct"
+    printf -v escaped '\\u%04x' "$code"
+    s=${s//$ch/$escaped}
+  done
+  printf '%s' "$s"
+}
+json_string(){ printf '"%s"' "$(json_escape "${1-}")"; }
+path_inside(){
+  local path=$1 root=$2
+  [[ $path == "$root" ]] && return 0
+  [[ $root == / ]] && [[ $path == /* ]] && return 0
+  [[ $path == "$root/"* ]]
+}
+display_source(){
+  local source=$1
+  if path_inside "$source" "$ROOT"; then
+    if [[ $source == "$ROOT" ]]; then printf '.'; else display_safe "${source#"$ROOT"/}"; fi
+  else
+    display_safe "$source"
+  fi
+}
+command_path(){ command -v "$1" 2>/dev/null || true; }
+normalize_selector(){
+  local tool=$1 v
+  v=$(trim "$2")
+  case "$tool" in
+    node) v=${v#v} ;;
+    go) v=${v#go} ;;
+    python) v=${v#python-} ;;
+  esac
+  printf '%s' "$v"
+}
+is_numeric_selector(){
+  local v
+  v=$(normalize_selector "$1" "$2")
+  [[ $v =~ ^[0-9]+([.][0-9]+){0,3}([+-][0-9A-Za-z.-]+)?$ ]]
+}
+selector_compatible(){
+  local tool=$1 a b
+  a=$(normalize_selector "$tool" "$2")
+  b=$(normalize_selector "$tool" "$3")
+  [[ $a == "$b" ]] && return 0
+  if is_numeric_selector "$tool" "$a" && is_numeric_selector "$tool" "$b"; then
+    case "$a." in "$b."*) return 0 ;; esac
+    case "$b." in "$a."*) return 0 ;; esac
+  fi
+  return 1
+}
+version_core(){
+  local v=$1
+  v=${v#v}; v=${v#go}; v=${v%%[-+]*}
+  printf '%s' "$v"
+}
+array_count(){
+  local ref="$1[@]"
+  set -- "${!ref}"
+  printf '%s' "$#"
+}
+array_get(){
+  local ref="$1[$2]"
+  printf '%s' "${!ref}"
+}
+version_ge(){
+  local a b i av bv a1 a2 a3 a4 b1 b2 b3 b4
+  local -a aparts bparts
+  a=$(version_core "$1"); b=$(version_core "$2")
+  IFS=. read -r -a aparts <<< "$a"
+  IFS=. read -r -a bparts <<< "$b"
+  a1=${aparts[0]:-0}; a2=${aparts[1]:-0}; a3=${aparts[2]:-0}; a4=${aparts[3]:-0}
+  b1=${bparts[0]:-0}; b2=${bparts[1]:-0}; b3=${bparts[2]:-0}; b4=${bparts[3]:-0}
+  for i in 1 2 3 4; do
+    case "$i" in
+      1) av=$a1; bv=$b1 ;;
+      2) av=$a2; bv=$b2 ;;
+      3) av=$a3; bv=$b3 ;;
+      4) av=$a4; bv=$b4 ;;
+    esac
+    [[ $av =~ ^[0-9]+$ ]] || av=0
+    [[ $bv =~ ^[0-9]+$ ]] || bv=0
+    (( 10#$av > 10#$bv )) && return 0
+    (( 10#$av < 10#$bv )) && return 1
+  done
+  return 0
+}
+simple_minimum(){
+  local tool=$1 raw
+  raw=$(trim "$2")
+  if [[ $raw =~ ^\>=[[:space:]]*([0-9]+([.][0-9]+){0,3})[[:space:]]*$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"; return 0
+  fi
+  if [[ $tool == go || $tool == rust ]] && [[ $raw =~ ^([0-9]+([.][0-9]+){0,3})$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"; return 0
+  fi
+  return 1
+}
+constraint_status(){
+  local tool=$1 raw active=$3 min
+  raw=$(trim "$2")
+  [[ -n $active ]] || return 2
+  if min=$(simple_minimum "$tool" "$raw" 2>/dev/null); then
+    version_ge "$active" "$min"; return
+  fi
+  if [[ $tool == node ]] && [[ $raw =~ ^[0-9]+([.][0-9]+){0,3}$ ]]; then
+    selector_compatible node "$active" "$raw"; return
+  fi
+  return 2
+}
+constraint_prompt(){
+  local tool=$1 raw min
+  raw=$(trim "$2")
+  if min=$(simple_minimum "$tool" "$raw" 2>/dev/null); then printf '≥%s' "$min"; return; fi
+  if [[ $tool == node ]] && [[ $raw =~ ^[0-9]+([.][0-9]+){0,3}$ ]]; then printf '%s.x' "$raw"; return; fi
+  raw=${raw//'>='/≥}
+  raw=${raw//' <='/≤}
+  printf '%s' "$raw"
+}
+short_active(){
+  local tool=$1 active=$2 selector=${3-} core count
+  core=$(version_core "$active")
+  if [[ -n $selector ]] && is_numeric_selector "$tool" "$selector"; then
+    selector=$(normalize_selector "$tool" "$selector")
+    count=1; [[ $selector == *.* ]] && count=2; [[ ${selector#*.} == *.* ]] && count=3
+  else
+    case "$tool" in node) count=1 ;; *) count=2 ;; esac
+  fi
+  local -a parts
+  IFS=. read -r -a parts <<< "$core"
+  case $count in
+    1) printf '%s' "${parts[0]:-$core}" ;;
+    2) printf '%s.%s' "${parts[0]:-0}" "${parts[1]:-0}" ;;
+    *) printf '%s.%s.%s' "${parts[0]:-0}" "${parts[1]:-0}" "${parts[2]:-0}" ;;
+  esac
+}
+
+REPO_ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
+if [[ -n $REPO_ROOT && -d $REPO_ROOT ]]; then
+  ROOT=$(cd -- "$REPO_ROOT" 2>/dev/null && pwd -P)
+  REPO_NAME=${ROOT##*/}
+  if [[ $format == prompt-record ]]; then
+    BRANCH=''; COMMIT=''; DETACHED=false
+  else
+    BRANCH=$(git -C "$CWD" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    COMMIT=$(git -C "$CWD" rev-parse --short HEAD 2>/dev/null || true)
+    if [[ -n $BRANCH ]]; then DETACHED=false; else DETACHED=true; fi
+  fi
+else
+  ROOT=$CWD
+  REPO_NAME=''
+  BRANCH=''
+  COMMIT=''
+  DETACHED=false
+fi
+
+DIRS=()
+d=$CWD
+while :; do
+  DIRS+=("$d")
+  [[ $d == "$ROOT" ]] && break
+  parent=${d%/*}; [[ -n $parent ]] || parent=/
+  [[ $parent == "$d" ]] && break
+  d=$parent
+done
+
+nearest_file(){
+  local name=$1 dir
+  FOUND_FILE=''
+  for dir in "${DIRS[@]}"; do
+    if [[ -f "$dir/$name" ]]; then FOUND_FILE="$dir/$name"; return 0; fi
+  done
+  return 1
+}
+nearest_relevant_tool_versions(){
+  local tool=$1 dir file line key rest
+  FOUND_FILE=''; FOUND_VALUE=''
+  for dir in "${DIRS[@]}"; do
+    file="$dir/.tool-versions"; [[ -f $file ]] || continue
+    while IFS= read -r line || [[ -n $line ]]; do
+      line=${line%$'\r'}; line=$(trim "$line")
+      [[ -z $line || ${line:0:1} == '#' ]] && continue
+      key=${line%%[[:space:]]*}
+      rest=${line#"$key"}; rest=$(trim "$rest")
+      case "$tool:$key" in
+        node:node|node:nodejs|python:python|go:go|go:golang|rust:rust)
+          [[ -n $rest ]] || continue
+          FOUND_FILE=$file; FOUND_VALUE=${rest%%[[:space:]]*}; return 0 ;;
+      esac
+    done < "$file"
+  done
+  return 1
+}
+toml_value_in_section(){
+  local file=$1 section=$2 key=$3
+  awk -v want_section="$section" -v want_key="$key" '
+    function trim(s){ sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); return s }
+    function unquote(s, q){
+      s=trim(s); q=substr(s,1,1)
+      if ((q=="\"" || q=="\047") && substr(s,length(s),1)==q) return substr(s,2,length(s)-2)
+      return ""
+    }
+    {
+      line=$0; sub(/\r$/,"",line)
+      stripped=trim(line)
+      if (stripped ~ /^\[[^]]+\][[:space:]]*$/) {
+        sec=stripped; sub(/^\[/,"",sec); sub(/\][[:space:]]*$/,"",sec)
+        inside=(sec==want_section); next
+      }
+      if (!inside || stripped ~ /^#/ || index(stripped,"=")==0) next
+      eq=index(stripped,"="); k=trim(substr(stripped,1,eq-1))
+      gsub(/^\047|\047$/,"",k); gsub(/^\"|\"$/,"",k)
+      if (k!=want_key) next
+      value=trim(substr(stripped,eq+1))
+      # Target fields are scalar strings. Refuse inline tables/arrays instead of guessing.
+      if (substr(value,1,1)!="\"" && substr(value,1,1)!="\047") exit
+      q=substr(value,1,1); out=""; esc=0
+      for (i=2;i<=length(value);i++) {
+        c=substr(value,i,1)
+        if (q=="\"" && esc) { out=out c; esc=0; continue }
+        if (q=="\"" && c=="\\") { esc=1; continue }
+        if (c==q) { print out; exit }
+        out=out c
+      }
+      exit
+    }
+  ' "$file" 2>/dev/null
+}
+nearest_toml_value(){
+  local filename=$1 section=$2 key=$3 dir file value
+  FOUND_FILE=''; FOUND_VALUE=''
+  for dir in "${DIRS[@]}"; do
+    file="$dir/$filename"; [[ -f $file ]] || continue
+    value=$(toml_value_in_section "$file" "$section" "$key")
+    if [[ -n $value ]]; then FOUND_FILE=$file; FOUND_VALUE=$value; return 0; fi
+  done
+  return 1
+}
+nearest_mise_value(){
+  local tool=$1 filename dir file value key found
+  MISE_FILES=(); MISE_VALUES=(); MISE_KINDS=()
+  for dir in "${DIRS[@]}"; do
+    found=0
+    for filename in .mise.toml mise.toml; do
+      file="$dir/$filename"; [[ -f $file ]] || continue
+      case "$tool" in
+        node)
+          for key in node nodejs; do
+            value=$(toml_value_in_section "$file" tools "$key")
+            if [[ -n $value ]]; then MISE_FILES+=("$file"); MISE_VALUES+=("$value"); MISE_KINDS+=("mise:$key"); found=1; break; fi
+          done ;;
+        python)
+          value=$(toml_value_in_section "$file" tools python)
+          [[ -n $value ]] && { MISE_FILES+=("$file"); MISE_VALUES+=("$value"); MISE_KINDS+=("mise:python"); found=1; } ;;
+        go)
+          for key in go golang; do
+            value=$(toml_value_in_section "$file" tools "$key")
+            if [[ -n $value ]]; then MISE_FILES+=("$file"); MISE_VALUES+=("$value"); MISE_KINDS+=("mise:$key"); found=1; break; fi
+          done ;;
+        rust)
+          value=$(toml_value_in_section "$file" tools rust)
+          [[ -n $value ]] && { MISE_FILES+=("$file"); MISE_VALUES+=("$value"); MISE_KINDS+=("mise:rust"); found=1; } ;;
+      esac
+    done
+    (( found )) && return 0
+  done
+  return 1
+}
+add_selector(){
+  local tool=$1 value=$2 kind=$3 source=$4
+  value=$(trim "$value"); metadata_value_safe "$value" || return 1
+  case "$tool" in
+    node) NODE_SEL_VALUES+=("$value"); NODE_SEL_KINDS+=("$kind"); NODE_SEL_SOURCES+=("$source") ;;
+    python) PY_SEL_VALUES+=("$value"); PY_SEL_KINDS+=("$kind"); PY_SEL_SOURCES+=("$source") ;;
+    go) GO_SEL_VALUES+=("$value"); GO_SEL_KINDS+=("$kind"); GO_SEL_SOURCES+=("$source") ;;
+    rust) RUST_SEL_VALUES+=("$value"); RUST_SEL_KINDS+=("$kind"); RUST_SEL_SOURCES+=("$source") ;;
+  esac
+}
+
+NODE_SEL_VALUES=(); NODE_SEL_KINDS=(); NODE_SEL_SOURCES=(); NODE_CONSTRAINT=''; NODE_CONSTRAINT_KIND=''; NODE_CONSTRAINT_SOURCE=''
+PY_SEL_VALUES=(); PY_SEL_KINDS=(); PY_SEL_SOURCES=(); PY_CONSTRAINT=''; PY_CONSTRAINT_KIND=''; PY_CONSTRAINT_SOURCE=''
+GO_SEL_VALUES=(); GO_SEL_KINDS=(); GO_SEL_SOURCES=(); GO_CONSTRAINT=''; GO_CONSTRAINT_KIND=''; GO_CONSTRAINT_SOURCE=''
+RUST_SEL_VALUES=(); RUST_SEL_KINDS=(); RUST_SEL_SOURCES=(); RUST_CONSTRAINT=''; RUST_CONSTRAINT_KIND=''; RUST_CONSTRAINT_SOURCE=''
+
+if nearest_file .nvmrc; then value=$(first_value_line "$FOUND_FILE" || true); [[ -n $value ]] && add_selector node "$value" nvmrc "$FOUND_FILE"; fi
+if nearest_file .node-version; then value=$(first_value_line "$FOUND_FILE" || true); [[ -n $value ]] && add_selector node "$value" node-version "$FOUND_FILE"; fi
+if nearest_relevant_tool_versions node; then add_selector node "$FOUND_VALUE" tool-versions "$FOUND_FILE"; fi
+nearest_mise_value node
+for ((i=0;i<${#MISE_FILES[@]};i++)); do add_selector node "${MISE_VALUES[$i]}" "${MISE_KINDS[$i]}" "${MISE_FILES[$i]}"; done
+
+# jq is a required Unix prerequisite, so package metadata remains available even when Node itself is missing.
+for dir in "${DIRS[@]}"; do
+  file="$dir/package.json"; [[ -f $file ]] || continue
+  if grep -Eq '"(engines|devEngines)"[[:space:]]*:' "$file" 2>/dev/null && command -v jq >/dev/null 2>&1; then
+    pkg_out=$(jq -r '
+      def clean: gsub("^[[:space:]]+|[[:space:]]+$"; "");
+      def runtimes:
+        (.devEngines.runtime? // empty)
+        | if type == "array" then .[] elif type == "object" then . else empty end;
+      (runtimes | select(.name == "node" and (.version | type) == "string") | (.version | clean) | select(length > 0) | ["selector", .] | @tsv),
+      (.engines.node? | select(type == "string") | clean | select(length > 0 and . != "*") | ["constraint", .] | @tsv)
+    ' "$file" 2>/dev/null || true)
+    if [[ -n $pkg_out ]]; then
+      found_package_node=0
+      while IFS=$'\t' read -r kind value; do
+        case "$kind" in
+          selector) if add_selector node "$value" package-devEngines "$file"; then found_package_node=1; fi ;;
+          constraint) if [[ -z $NODE_CONSTRAINT ]] && metadata_value_safe "$value"; then NODE_CONSTRAINT=$value; NODE_CONSTRAINT_KIND=package-engines; NODE_CONSTRAINT_SOURCE=$file; found_package_node=1; fi ;;
+        esac
+      done <<< "$pkg_out"
+      (( found_package_node )) && break
+    fi
+  fi
+done
+
+if nearest_file .python-version; then
+  value=$(first_value_line "$FOUND_FILE" || true)
+  [[ -n $value ]] && add_selector python "${value%%[[:space:]]*}" python-version "$FOUND_FILE"
+fi
+if nearest_relevant_tool_versions python; then add_selector python "$FOUND_VALUE" tool-versions "$FOUND_FILE"; fi
+nearest_mise_value python
+for ((i=0;i<${#MISE_FILES[@]};i++)); do add_selector python "${MISE_VALUES[$i]}" "${MISE_KINDS[$i]}" "${MISE_FILES[$i]}"; done
+if nearest_toml_value pyproject.toml project requires-python && metadata_value_safe "$FOUND_VALUE"; then
+  PY_CONSTRAINT=$FOUND_VALUE; PY_CONSTRAINT_KIND=pyproject-requires-python; PY_CONSTRAINT_SOURCE=$FOUND_FILE
+fi
+
+# A project-local active virtual environment is itself an explicit interpreter selection.
+PY_PATH=''; PY_VERSION=''; PY_VENV=''; PY_VENV_INSIDE=0
+if [[ -n ${VIRTUAL_ENV:-} ]]; then
+  PY_VENV=$VIRTUAL_ENV
+  if [[ -d $PY_VENV ]]; then
+    resolved_venv=$(cd -- "$PY_VENV" 2>/dev/null && pwd -P) || resolved_venv=$PY_VENV
+    PY_VENV=$resolved_venv
+  fi
+  path_inside "$PY_VENV" "$ROOT" && PY_VENV_INSIDE=1
+fi
+if (( ${#PY_SEL_VALUES[@]} > 0 || PY_VENV_INSIDE == 1 )) || [[ -n $PY_CONSTRAINT ]]; then
+  for pycmd in python python3; do
+    candidate=$(command_path "$pycmd")
+    [[ -n $candidate ]] || continue
+    case "$candidate" in */WindowsApps/python*.exe) continue ;; esac
+    PY_PATH=$candidate
+    PY_VERSION=$(MISE_OFFLINE=true MISE_AUTO_INSTALL=false MISE_NOT_FOUND_AUTO_INSTALL=false MISE_EXEC_AUTO_INSTALL=false MISE_NO_HOOKS=1 "$candidate" --version 2>&1 | awk 'NR==1{print $2; exit}' || true)
+    [[ -n $PY_VERSION ]] && break
+    PY_PATH=''
+  done
+fi
+if (( PY_VENV_INSIDE == 1 )) && [[ -n $PY_PATH ]]; then
+  py_parent=${PY_PATH%/*}
+  if [[ -d $py_parent ]]; then py_real_parent=$(cd -- "$py_parent" 2>/dev/null && pwd -P) || py_real_parent=$py_parent; else py_real_parent=$py_parent; fi
+  py_real="$py_real_parent/${PY_PATH##*/}"
+  if path_inside "$py_real" "$PY_VENV"; then add_selector python "$PY_VERSION" virtualenv "$PY_VENV"; fi
+fi
+
+if nearest_relevant_tool_versions go; then add_selector go "$FOUND_VALUE" tool-versions "$FOUND_FILE"; fi
+nearest_mise_value go
+for ((i=0;i<${#MISE_FILES[@]};i++)); do add_selector go "${MISE_VALUES[$i]}" "${MISE_KINDS[$i]}" "${MISE_FILES[$i]}"; done
+GO_PROJECT_FILE=''
+if nearest_file go.work; then GO_PROJECT_FILE=$FOUND_FILE; elif nearest_file go.mod; then GO_PROJECT_FILE=$FOUND_FILE; fi
+if [[ -n $GO_PROJECT_FILE ]]; then
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      toolchain) [[ $value != default ]] && add_selector go "$value" go-toolchain "$GO_PROJECT_FILE" ;;
+      go) if metadata_value_safe "$value"; then GO_CONSTRAINT=$value; GO_CONSTRAINT_KIND=go-directive; GO_CONSTRAINT_SOURCE=$GO_PROJECT_FILE; fi ;;
+    esac
+  done < <(awk '/^[[:space:]]*toolchain[[:space:]]+/{print "toolchain\t"$2} /^[[:space:]]*go[[:space:]]+/{print "go\t"$2}' "$GO_PROJECT_FILE" 2>/dev/null)
+fi
+
+if nearest_relevant_tool_versions rust; then add_selector rust "$FOUND_VALUE" tool-versions "$FOUND_FILE"; fi
+nearest_mise_value rust
+for ((i=0;i<${#MISE_FILES[@]};i++)); do add_selector rust "${MISE_VALUES[$i]}" "${MISE_KINDS[$i]}" "${MISE_FILES[$i]}"; done
+# rustup defines proximity across rust-toolchain(.toml), with rust-toolchain winning a tie.
+RUST_TOOLCHAIN_FILE=''
+for dir in "${DIRS[@]}"; do
+  if [[ -f "$dir/rust-toolchain" ]]; then RUST_TOOLCHAIN_FILE="$dir/rust-toolchain"; break; fi
+  if [[ -f "$dir/rust-toolchain.toml" ]]; then RUST_TOOLCHAIN_FILE="$dir/rust-toolchain.toml"; break; fi
+done
+if [[ -n $RUST_TOOLCHAIN_FILE ]]; then
+  if [[ ${RUST_TOOLCHAIN_FILE##*/} == rust-toolchain.toml ]] || grep -Eq '^[[:space:]]*\[toolchain\]' "$RUST_TOOLCHAIN_FILE" 2>/dev/null; then
+    value=$(toml_value_in_section "$RUST_TOOLCHAIN_FILE" toolchain channel)
+  else
+    value=$(first_value_line "$RUST_TOOLCHAIN_FILE" || true)
+  fi
+  [[ -n $value ]] && add_selector rust "$value" rust-toolchain "$RUST_TOOLCHAIN_FILE"
+fi
+if nearest_toml_value Cargo.toml package rust-version && metadata_value_safe "$FOUND_VALUE"; then
+  RUST_CONSTRAINT=$FOUND_VALUE; RUST_CONSTRAINT_KIND=cargo-rust-version; RUST_CONSTRAINT_SOURCE=$FOUND_FILE
+fi
+
+selectors_compatible(){
+  local tool=$1 a=$2 kind_a=$3 b=$4 kind_b=$5 a_norm b_norm
+  selector_compatible "$tool" "$a" "$b" && return 0
+  if [[ $tool == go ]] && is_numeric_selector go "$a" && is_numeric_selector go "$b"; then
+    a_norm=$(normalize_selector go "$a"); b_norm=$(normalize_selector go "$b")
+    if [[ $kind_a == go-toolchain && $kind_b == go-toolchain ]]; then return 0; fi
+    if [[ $kind_a == go-toolchain ]]; then version_ge "$b_norm" "$a_norm"; return; fi
+    if [[ $kind_b == go-toolchain ]]; then version_ge "$a_norm" "$b_norm"; return; fi
+  fi
+  return 1
+}
+selector_status(){
+  local tool=$1 selector=$2 kind=$3 active=$4
+  [[ -n $active ]] || return 2
+  is_numeric_selector "$tool" "$selector" || return 2
+  if [[ $tool == go && $kind == go-toolchain ]]; then
+    version_ge "$active" "$(normalize_selector go "$selector")"
+  else
+    selector_compatible "$tool" "$active" "$selector"
+  fi
+}
+
+resolve_tool(){
+  local tool=$1 values_name=$2 kinds_name=$3 sources_name=$4 constraint=$5 constraint_kind=$6 constraint_source=$7
+  local count
+  count=$(array_count "$values_name")
+  local relevant=0; (( count > 0 )) && relevant=1; [[ -n $constraint ]] && relevant=1
+  [[ $relevant -eq 1 ]] || return 0
+
+  local i j value kind source other other_kind conflict=0
+  local selector='' selector_kind='' selector_source=''
+  if (( count > 0 )); then
+    selector=$(array_get "$values_name" 0); selector_kind=$(array_get "$kinds_name" 0); selector_source=$(array_get "$sources_name" 0)
+    for ((i=0;i<count;i++)); do
+      value=$(array_get "$values_name" "$i"); kind=$(array_get "$kinds_name" "$i"); source=$(array_get "$sources_name" "$i")
+      for ((j=i+1;j<count;j++)); do
+        other=$(array_get "$values_name" "$j"); other_kind=$(array_get "$kinds_name" "$j")
+        selectors_compatible "$tool" "$value" "$kind" "$other" "$other_kind" || conflict=1
+      done
+      if is_numeric_selector "$tool" "$value"; then
+        if [[ $tool == go ]]; then
+          if [[ $selector_kind == go-toolchain && $kind != go-toolchain ]]; then
+            selector=$value; selector_kind=$kind; selector_source=$source
+          elif [[ $selector_kind == "$kind" || $selector_kind != go-toolchain && $kind != go-toolchain ]] && { ! is_numeric_selector "$tool" "$selector" || [[ ${#value} -gt ${#selector} ]]; }; then
+            selector=$value; selector_kind=$kind; selector_source=$source
+          fi
+        elif ! is_numeric_selector "$tool" "$selector" || [[ ${#value} -gt ${#selector} ]]; then
+          selector=$value; selector_kind=$kind; selector_source=$source
+        fi
+      fi
+    done
+  fi
+
+  local active='' active_path='' active_authoritative=1 note='' needed='' min='' candidate_needed='' go_mode='' local_out='' rust_out=''
+  case "$tool" in
+    node)
+      active_path=$(command_path node)
+      if [[ -n $active_path ]]; then active=$(MISE_OFFLINE=true MISE_AUTO_INSTALL=false MISE_NOT_FOUND_AUTO_INSTALL=false MISE_EXEC_AUTO_INSTALL=false MISE_NO_HOOKS=1 node --version 2>/dev/null || true); active=${active#v}; metadata_value_safe "$active" || active=''; fi ;;
+    python)
+      active=$PY_VERSION; active_path=$PY_PATH; metadata_value_safe "$active" || active='' ;;
+    go)
+      active_path=$(command_path go)
+      if [[ -n $active_path ]]; then
+        local_out=$(GOTOOLCHAIN=local MISE_OFFLINE=true MISE_AUTO_INSTALL=false MISE_NOT_FOUND_AUTO_INSTALL=false MISE_EXEC_AUTO_INSTALL=false MISE_NO_HOOKS=1 go version 2>/dev/null || true)
+        active=$(printf '%s\n' "$local_out" | awk 'NR==1{for(i=1;i<=NF;i++) if($i ~ /^go[0-9]/){sub(/^go/,"",$i); print $i; exit}}')
+        metadata_value_safe "$active" || active=''
+        go_mode=${GOTOOLCHAIN:-auto}
+        if [[ $go_mode != local ]]; then
+          if [[ $go_mode != auto ]]; then
+            active_authoritative=0
+            note="GOTOOLCHAIN=$go_mode can select a different Go toolchain; active runtime was not resolved to avoid automatic toolchain changes"
+          elif [[ -n $active ]]; then
+            for ((i=0;i<count;i++)); do
+              value=$(array_get "$values_name" "$i"); kind=$(array_get "$kinds_name" "$i")
+              if [[ $kind == go-toolchain ]] && is_numeric_selector go "$value"; then
+                candidate_needed=$(normalize_selector go "$value")
+                if [[ -z $needed ]] || version_ge "$candidate_needed" "$needed"; then needed=$candidate_needed; fi
+              fi
+            done
+            if min=$(simple_minimum go "$constraint" 2>/dev/null); then
+              if [[ -z $needed ]] || version_ge "$min" "$needed"; then needed=$min; fi
+            fi
+            if [[ -n $needed ]] && ! version_ge "$active" "$needed"; then
+              active_authoritative=0
+              note="local Go $active is older than project context; automatic toolchain selection may choose another installed or downloadable toolchain"
+            fi
+          fi
+        fi
+      fi ;;
+    rust)
+      active_path=$(command_path rustc)
+      if [[ -n $active_path ]]; then
+        rust_out=$(RUSTUP_AUTO_INSTALL=0 MISE_OFFLINE=true MISE_AUTO_INSTALL=false MISE_NOT_FOUND_AUTO_INSTALL=false MISE_EXEC_AUTO_INSTALL=false MISE_NO_HOOKS=1 rustc --version 2>/dev/null || true)
+        active=$(printf '%s\n' "$rust_out" | awk 'NR==1 && $1=="rustc"{print $2; exit}')
+        metadata_value_safe "$active" || active=''
+      fi ;;
+  esac
+
+  local missing=0 mismatch=0 selector_mismatch=0 constraint_mismatch=0 selector_state='' constraint_state=''
+  if (( conflict == 0 && active_authoritative == 1 )); then
+    if (( count > 0 )); then
+      if [[ -z $active ]]; then
+        missing=1
+      elif selector_status "$tool" "$selector" "$selector_kind" "$active"; then
+        selector_state=satisfied
+      else
+        case $? in
+          1) selector_state=mismatch; selector_mismatch=1 ;;
+          *) selector_state=unknown ;;
+        esac
+      fi
+    fi
+    if [[ -n $active && -n $constraint ]]; then
+      if constraint_status "$tool" "$constraint" "$active"; then
+        constraint_state=satisfied
+      else
+        case $? in
+          1) constraint_state=mismatch; constraint_mismatch=1 ;;
+          *) constraint_state=unknown ;;
+        esac
+      fi
+    fi
+  fi
+  (( selector_mismatch || constraint_mismatch )) && mismatch=1
+
+  local prompt='' state=normal label
+  case "$tool" in node) label=node ;; python) label=py ;; go) label=go ;; rust) label=rust ;; esac
+  if (( conflict )); then
+    prompt="$label !"; state=warning
+  elif (( count > 0 )); then
+    if (( missing )); then
+      prompt="$label $(normalize_selector "$tool" "$selector") · missing"; state=warning
+    elif (( selector_mismatch )); then
+      prompt="$label $(short_active "$tool" "$active" "$selector") ≠ $(normalize_selector "$tool" "$selector")"; state=warning
+    elif (( constraint_mismatch )); then
+      prompt="$label $(short_active "$tool" "$active") < $(constraint_prompt "$tool" "$constraint")"; state=warning
+    else
+      prompt="$label $(normalize_selector "$tool" "$selector")"
+    fi
+  elif [[ -n $constraint ]]; then
+    if (( constraint_mismatch )); then prompt="$label $(short_active "$tool" "$active") < $(constraint_prompt "$tool" "$constraint")"; state=warning
+    else prompt="$label $(constraint_prompt "$tool" "$constraint")"
+    fi
+  fi
+  if (( active_authoritative == 0 )); then state=warning; active=''; active_path=''; [[ -n $prompt ]] && prompt+=" · active?"; fi
+  if (( conflict )); then selector=''; selector_kind=''; selector_source=''; fi
+
+  case "$tool" in
+    node) NODE_RELEVANT=1; NODE_SELECTOR=$selector; NODE_SELECTOR_KIND=$selector_kind; NODE_SELECTOR_SOURCE=$selector_source; NODE_CONFLICT=$conflict; NODE_ACTIVE=$active; NODE_ACTIVE_PATH=$active_path; NODE_MISSING=$missing; NODE_MISMATCH=$mismatch; NODE_SELECTOR_STATUS=$selector_state; NODE_CONSTRAINT_STATUS=$constraint_state; NODE_PROMPT=$prompt; NODE_STATE=$state; NODE_NOTE=$note ;;
+    python) PY_RELEVANT=1; PY_SELECTOR=$selector; PY_SELECTOR_KIND=$selector_kind; PY_SELECTOR_SOURCE=$selector_source; PY_CONFLICT=$conflict; PY_ACTIVE=$active; PY_ACTIVE_PATH=$active_path; PY_MISSING=$missing; PY_MISMATCH=$mismatch; PY_SELECTOR_STATUS=$selector_state; PY_CONSTRAINT_STATUS=$constraint_state; PY_PROMPT=$prompt; PY_STATE=$state; PY_NOTE=$note ;;
+    go) GO_RELEVANT=1; GO_SELECTOR=$selector; GO_SELECTOR_KIND=$selector_kind; GO_SELECTOR_SOURCE=$selector_source; GO_CONFLICT=$conflict; GO_ACTIVE=$active; GO_ACTIVE_PATH=$active_path; GO_MISSING=$missing; GO_MISMATCH=$mismatch; GO_SELECTOR_STATUS=$selector_state; GO_CONSTRAINT_STATUS=$constraint_state; GO_PROMPT=$prompt; GO_STATE=$state; GO_NOTE=$note ;;
+    rust) RUST_RELEVANT=1; RUST_SELECTOR=$selector; RUST_SELECTOR_KIND=$selector_kind; RUST_SELECTOR_SOURCE=$selector_source; RUST_CONFLICT=$conflict; RUST_ACTIVE=$active; RUST_ACTIVE_PATH=$active_path; RUST_MISSING=$missing; RUST_MISMATCH=$mismatch; RUST_SELECTOR_STATUS=$selector_state; RUST_CONSTRAINT_STATUS=$constraint_state; RUST_PROMPT=$prompt; RUST_STATE=$state; RUST_NOTE=$note ;;
+  esac
+}
+
+NODE_RELEVANT=0; PY_RELEVANT=0; GO_RELEVANT=0; RUST_RELEVANT=0
+NODE_SELECTOR=''; PY_SELECTOR=''; GO_SELECTOR=''; RUST_SELECTOR=''
+NODE_SELECTOR_KIND=''; PY_SELECTOR_KIND=''; GO_SELECTOR_KIND=''; RUST_SELECTOR_KIND=''
+NODE_SELECTOR_SOURCE=''; PY_SELECTOR_SOURCE=''; GO_SELECTOR_SOURCE=''; RUST_SELECTOR_SOURCE=''
+NODE_ACTIVE=''; PY_ACTIVE=''; GO_ACTIVE=''; RUST_ACTIVE=''
+NODE_ACTIVE_PATH=''; PY_ACTIVE_PATH=''; GO_ACTIVE_PATH=''; RUST_ACTIVE_PATH=''
+NODE_CONFLICT=0; PY_CONFLICT=0; GO_CONFLICT=0; RUST_CONFLICT=0
+NODE_MISSING=0; PY_MISSING=0; GO_MISSING=0; RUST_MISSING=0
+NODE_MISMATCH=0; PY_MISMATCH=0; GO_MISMATCH=0; RUST_MISMATCH=0
+NODE_PROMPT=''; PY_PROMPT=''; GO_PROMPT=''; RUST_PROMPT=''
+NODE_STATE=normal; PY_STATE=normal; GO_STATE=normal; RUST_STATE=normal
+NODE_NOTE=''; PY_NOTE=''; GO_NOTE=''; RUST_NOTE=''
+NODE_SELECTOR_STATUS=''; PY_SELECTOR_STATUS=''; GO_SELECTOR_STATUS=''; RUST_SELECTOR_STATUS=''
+NODE_CONSTRAINT_STATUS=''; PY_CONSTRAINT_STATUS=''; GO_CONSTRAINT_STATUS=''; RUST_CONSTRAINT_STATUS=''
+resolve_tool node NODE_SEL_VALUES NODE_SEL_KINDS NODE_SEL_SOURCES "$NODE_CONSTRAINT" "$NODE_CONSTRAINT_KIND" "$NODE_CONSTRAINT_SOURCE"
+resolve_tool python PY_SEL_VALUES PY_SEL_KINDS PY_SEL_SOURCES "$PY_CONSTRAINT" "$PY_CONSTRAINT_KIND" "$PY_CONSTRAINT_SOURCE"
+resolve_tool go GO_SEL_VALUES GO_SEL_KINDS GO_SEL_SOURCES "$GO_CONSTRAINT" "$GO_CONSTRAINT_KIND" "$GO_CONSTRAINT_SOURCE"
+resolve_tool rust RUST_SEL_VALUES RUST_SEL_KINDS RUST_SEL_SOURCES "$RUST_CONSTRAINT" "$RUST_CONSTRAINT_KIND" "$RUST_CONSTRAINT_SOURCE"
+
+PROMPT_PARTS=(); PROMPT_STATE=normal
+for tool in NODE PY GO RUST; do
+  ref="${tool}_RELEVANT"; relevant=${!ref}; (( relevant )) || continue
+  ref="${tool}_PROMPT"; part=${!ref}; [[ -n $part ]] && PROMPT_PARTS+=("$part")
+  ref="${tool}_STATE"; state=${!ref}; [[ $state == warning ]] && PROMPT_STATE=warning
+done
+PROMPT_TEXT=''
+for part in "${PROMPT_PARTS[@]}"; do
+  if [[ -n $PROMPT_TEXT ]]; then PROMPT_TEXT+="  "; fi
+  PROMPT_TEXT+=$part
+done
+
+print_evidence_human(){
+  local tool=$1 values_name=$2 kinds_name=$3 sources_name=$4 selector=$5 selector_kind=$6 conflict=$7 constraint=$8 constraint_source=$9
+  shift 9
+  local active=$1 active_path=$2 missing=$3 mismatch=$4 note=$5 selector_state=$6 constraint_state=$7 count i value kind source relation reference
+  reference=$selector
+  count=$(array_count "$values_name")
+  for ((i=0;i<count;i++)); do
+    value=$(array_get "$values_name" "$i"); kind=$(array_get "$kinds_name" "$i"); source=$(array_get "$sources_name" "$i")
+    if (( i == 0 )); then
+      relation=requested
+      [[ -n $reference ]] || { reference=$value; selector_kind=$kind; }
+    elif (( conflict )); then relation=conflict
+    elif selectors_compatible "$tool" "$value" "$kind" "$reference" "$selector_kind"; then relation=also
+    else relation=conflict
+    fi
+    printf '  %-10s %-14s %s\n' "$relation" "$value" "$(display_source "$source")"
+  done
+  if [[ -n $constraint ]]; then printf '  %-10s %-14s %s\n' requires "$constraint" "$(display_source "$constraint_source")"; fi
+  if [[ -n $active ]]; then printf '  %-10s %-14s %s\n' active "$active" "$(display_safe "$active_path")"; fi
+  if (( conflict )); then printf '  %-10s %s\n' attention 'conflicting project selectors; no precedence was invented'
+  elif (( missing )); then printf '  %-10s %s\n' attention 'selected runtime is not available on PATH'
+  elif (( mismatch )); then printf '  %-10s %s\n' attention 'active runtime does not satisfy the project context'
+  elif [[ -n $note ]]; then printf '  %-10s %s\n' attention "$(display_safe "$note")"
+  elif [[ $selector_state == unknown ]]; then printf '  %-10s %s\n' note 'selector compatibility was not evaluated for this syntax'
+  elif [[ $constraint_state == unknown ]]; then printf '  %-10s %s\n' note 'constraint compatibility was not evaluated for this syntax'
+  fi
+}
+print_human(){
+  printf 'Project context\n\n'
+  printf '%-11s %s\n' Root "$(display_safe "$ROOT")"
+  if [[ -n $REPO_NAME ]]; then
+    printf '%-11s %s\n' Repository "$(display_safe "$REPO_NAME")"
+    if [[ -n $BRANCH ]]; then printf '%-11s %s\n' Branch "$(display_safe "$BRANCH")"; elif [[ -n $COMMIT ]]; then printf '%-11s %s\n' Revision "detached@$COMMIT"; fi
+  else
+    printf '%-11s %s\n' Repository '(none)'
+  fi
+  for tool in node python go rust; do
+    case "$tool" in
+      node) relevant=$NODE_RELEVANT; title=Node; values=NODE_SEL_VALUES; kinds=NODE_SEL_KINDS; sources=NODE_SEL_SOURCES; selector=$NODE_SELECTOR; skind=$NODE_SELECTOR_KIND; conflict=$NODE_CONFLICT; constraint=$NODE_CONSTRAINT; csource=$NODE_CONSTRAINT_SOURCE; active=$NODE_ACTIVE; apath=$NODE_ACTIVE_PATH; missing=$NODE_MISSING; mismatch=$NODE_MISMATCH; note=$NODE_NOTE; sstatus=$NODE_SELECTOR_STATUS; cstatus=$NODE_CONSTRAINT_STATUS ;;
+      python) relevant=$PY_RELEVANT; title=Python; values=PY_SEL_VALUES; kinds=PY_SEL_KINDS; sources=PY_SEL_SOURCES; selector=$PY_SELECTOR; skind=$PY_SELECTOR_KIND; conflict=$PY_CONFLICT; constraint=$PY_CONSTRAINT; csource=$PY_CONSTRAINT_SOURCE; active=$PY_ACTIVE; apath=$PY_ACTIVE_PATH; missing=$PY_MISSING; mismatch=$PY_MISMATCH; note=$PY_NOTE; sstatus=$PY_SELECTOR_STATUS; cstatus=$PY_CONSTRAINT_STATUS ;;
+      go) relevant=$GO_RELEVANT; title=Go; values=GO_SEL_VALUES; kinds=GO_SEL_KINDS; sources=GO_SEL_SOURCES; selector=$GO_SELECTOR; skind=$GO_SELECTOR_KIND; conflict=$GO_CONFLICT; constraint=$GO_CONSTRAINT; csource=$GO_CONSTRAINT_SOURCE; active=$GO_ACTIVE; apath=$GO_ACTIVE_PATH; missing=$GO_MISSING; mismatch=$GO_MISMATCH; note=$GO_NOTE; sstatus=$GO_SELECTOR_STATUS; cstatus=$GO_CONSTRAINT_STATUS ;;
+      rust) relevant=$RUST_RELEVANT; title=Rust; values=RUST_SEL_VALUES; kinds=RUST_SEL_KINDS; sources=RUST_SEL_SOURCES; selector=$RUST_SELECTOR; skind=$RUST_SELECTOR_KIND; conflict=$RUST_CONFLICT; constraint=$RUST_CONSTRAINT; csource=$RUST_CONSTRAINT_SOURCE; active=$RUST_ACTIVE; apath=$RUST_ACTIVE_PATH; missing=$RUST_MISSING; mismatch=$RUST_MISMATCH; note=$RUST_NOTE; sstatus=$RUST_SELECTOR_STATUS; cstatus=$RUST_CONSTRAINT_STATUS ;;
+    esac
+    (( relevant )) || continue
+    printf '\n%s\n' "$title"
+    print_evidence_human "$tool" "$values" "$kinds" "$sources" "$selector" "$skind" "$conflict" "$constraint" "$csource" "$active" "$apath" "$missing" "$mismatch" "$note" "$sstatus" "$cstatus"
+  done
+  if (( NODE_RELEVANT + PY_RELEVANT + GO_RELEVANT + RUST_RELEVANT == 0 )); then printf '\nNo authoritative project runtime declarations found.\n'; fi
+}
+plain_bool(){ if (( $1 )); then printf true; else printf false; fi; }
+print_plain_tool(){
+  local name=$1 values=$2 kinds=$3 sources=$4 constraint=$5 constraint_kind=$6 constraint_source=$7 active=$8 active_path=$9
+  shift 9
+  local conflict=$1 missing=$2 mismatch=$3 state=$4 note=$5 selector_state=$6 constraint_state=$7 count i value kind source
+  count=$(array_count "$values")
+  for ((i=0;i<count;i++)); do
+    value=$(array_get "$values" "$i"); kind=$(array_get "$kinds" "$i"); source=$(array_get "$sources" "$i")
+    printf 'toolchain\t%s\tselector\t%s\t%s\t%s\n' "$name" "$(display_safe "$value")" "$(display_safe "$kind")" "$(display_safe "$source")"
+  done
+  if [[ -n $constraint ]]; then
+    printf 'toolchain\t%s\tconstraint\t%s\t%s\t%s\n' "$name" "$(display_safe "$constraint")" "$(display_safe "$constraint_kind")" "$(display_safe "$constraint_source")"
+  fi
+  if [[ -n $active ]]; then
+    printf 'toolchain\t%s\tactive\t%s\tpath\t%s\n' "$name" "$(display_safe "$active")" "$(display_safe "$active_path")"
+  fi
+  [[ -n $selector_state ]] && printf 'toolchain\t%s\tselector_status\t%s\t\t\n' "$name" "$(display_safe "$selector_state")"
+  [[ -n $constraint_state ]] && printf 'toolchain\t%s\tconstraint_status\t%s\t\t\n' "$name" "$(display_safe "$constraint_state")"
+  printf 'toolchain\t%s\tconflict\t%s\t\t\n' "$name" "$(plain_bool "$conflict")"
+  printf 'toolchain\t%s\tmissing\t%s\t\t\n' "$name" "$(plain_bool "$missing")"
+  printf 'toolchain\t%s\tmismatch\t%s\t\t\n' "$name" "$(plain_bool "$mismatch")"
+  printf 'toolchain\t%s\tstate\t%s\t\t\n' "$name" "$(display_safe "$state")"
+  [[ -n $note ]] && printf 'toolchain\t%s\tnote\t%s\t\t\n' "$name" "$(display_safe "$note")"
+}
+print_plain(){
+  printf 'context\tcwd\t%s\n' "$(display_safe "$CWD")"
+  printf 'context\troot\t%s\n' "$(display_safe "$ROOT")"
+  printf 'repository\tname\t%s\n' "$(display_safe "$REPO_NAME")"
+  printf 'repository\tbranch\t%s\n' "$(display_safe "$BRANCH")"
+  printf 'repository\tdetached\t%s\n' "$DETACHED"
+  printf 'repository\tcommit\t%s\n' "$(display_safe "$COMMIT")"
+  if (( NODE_RELEVANT )); then print_plain_tool node NODE_SEL_VALUES NODE_SEL_KINDS NODE_SEL_SOURCES "$NODE_CONSTRAINT" "$NODE_CONSTRAINT_KIND" "$NODE_CONSTRAINT_SOURCE" "$NODE_ACTIVE" "$NODE_ACTIVE_PATH" "$NODE_CONFLICT" "$NODE_MISSING" "$NODE_MISMATCH" "$NODE_STATE" "$NODE_NOTE" "$NODE_SELECTOR_STATUS" "$NODE_CONSTRAINT_STATUS"; fi
+  if (( PY_RELEVANT )); then print_plain_tool python PY_SEL_VALUES PY_SEL_KINDS PY_SEL_SOURCES "$PY_CONSTRAINT" "$PY_CONSTRAINT_KIND" "$PY_CONSTRAINT_SOURCE" "$PY_ACTIVE" "$PY_ACTIVE_PATH" "$PY_CONFLICT" "$PY_MISSING" "$PY_MISMATCH" "$PY_STATE" "$PY_NOTE" "$PY_SELECTOR_STATUS" "$PY_CONSTRAINT_STATUS"; fi
+  if (( GO_RELEVANT )); then print_plain_tool go GO_SEL_VALUES GO_SEL_KINDS GO_SEL_SOURCES "$GO_CONSTRAINT" "$GO_CONSTRAINT_KIND" "$GO_CONSTRAINT_SOURCE" "$GO_ACTIVE" "$GO_ACTIVE_PATH" "$GO_CONFLICT" "$GO_MISSING" "$GO_MISMATCH" "$GO_STATE" "$GO_NOTE" "$GO_SELECTOR_STATUS" "$GO_CONSTRAINT_STATUS"; fi
+  if (( RUST_RELEVANT )); then print_plain_tool rust RUST_SEL_VALUES RUST_SEL_KINDS RUST_SEL_SOURCES "$RUST_CONSTRAINT" "$RUST_CONSTRAINT_KIND" "$RUST_CONSTRAINT_SOURCE" "$RUST_ACTIVE" "$RUST_ACTIVE_PATH" "$RUST_CONFLICT" "$RUST_MISSING" "$RUST_MISMATCH" "$RUST_STATE" "$RUST_NOTE" "$RUST_SELECTOR_STATUS" "$RUST_CONSTRAINT_STATUS"; fi
+  printf 'prompt\tstate\t%s\n' "$(display_safe "$PROMPT_STATE")"
+  printf 'prompt\ttext\t%s\n' "$(display_safe "$PROMPT_TEXT")"
+}
+json_evidence_array(){
+  local values_name=$1 kinds_name=$2 sources_name=$3 count i value kind source
+  count=$(array_count "$values_name")
+  printf '['
+  for ((i=0;i<count;i++)); do
+    (( i > 0 )) && printf ','
+    value=$(array_get "$values_name" "$i"); kind=$(array_get "$kinds_name" "$i"); source=$(array_get "$sources_name" "$i")
+    printf '{"value":'; json_string "$value"; printf ',"kind":'; json_string "$kind"; printf ',"source":'; json_string "$source"; printf '}'
+  done
+  printf ']'
+}
+json_tool(){
+  local name=$1 values=$2 kinds=$3 sources=$4 selector=$5 selector_kind=$6 selector_source=$7 conflict=$8 constraint=$9
+  shift 9
+  local constraint_kind=$1 constraint_source=$2 active=$3 active_path=$4 missing=$5 mismatch=$6 prompt=$7 state=$8 note=$9
+  shift 9
+  local selector_state=$1 constraint_state=$2
+  printf '"%s":{' "$name"
+  printf '"selectors":'; json_evidence_array "$values" "$kinds" "$sources"
+  printf ',"selector":'; if [[ -n $selector ]]; then printf '{"value":'; json_string "$selector"; printf ',"kind":'; json_string "$selector_kind"; printf ',"source":'; json_string "$selector_source"; printf '}'; else printf 'null'; fi
+  printf ',"selector_status":'; if [[ -n $selector_state ]]; then json_string "$selector_state"; else printf 'null'; fi
+  printf ',"constraint":'; if [[ -n $constraint ]]; then printf '{"value":'; json_string "$constraint"; printf ',"kind":'; json_string "$constraint_kind"; printf ',"source":'; json_string "$constraint_source"; printf '}'; else printf 'null'; fi
+  printf ',"constraint_status":'; if [[ -n $constraint_state ]]; then json_string "$constraint_state"; else printf 'null'; fi
+  printf ',"active":'; if [[ -n $active ]]; then printf '{"version":'; json_string "$active"; printf ',"path":'; json_string "$active_path"; printf ',"kind":"path"}'; else printf 'null'; fi
+  local conflict_json=false missing_json=false mismatch_json=false
+  (( conflict == 1 )) && conflict_json=true
+  (( missing == 1 )) && missing_json=true
+  (( mismatch == 1 )) && mismatch_json=true
+  printf ',"conflict":%s,"missing":%s,"mismatch":%s,"prompt":' "$conflict_json" "$missing_json" "$mismatch_json"
+  json_string "$prompt"; printf ',"state":'; json_string "$state"; printf ',"note":'; if [[ -n $note ]]; then json_string "$note"; else printf 'null'; fi
+  printf '}'
+}
+print_json(){
+  printf '{"schema_version":1,"cwd":'; json_string "$CWD"; printf ',"root":'; json_string "$ROOT"
+  printf ',"repository":{'
+  if [[ -n $REPO_NAME ]]; then
+    printf '"name":'; json_string "$REPO_NAME"; printf ',"root":'; json_string "$ROOT"; printf ',"branch":'; if [[ -n $BRANCH ]]; then json_string "$BRANCH"; else printf 'null'; fi
+    printf ',"detached":%s,"commit":' "$DETACHED"; if [[ -n $COMMIT ]]; then json_string "$COMMIT"; else printf 'null'; fi
+  else
+    printf '"name":null,"root":null,"branch":null,"detached":false,"commit":null'
+  fi
+  printf '},"toolchains":{'
+  first=1
+  if (( NODE_RELEVANT )); then (( first )) || printf ','; first=0; json_tool node NODE_SEL_VALUES NODE_SEL_KINDS NODE_SEL_SOURCES "$NODE_SELECTOR" "$NODE_SELECTOR_KIND" "$NODE_SELECTOR_SOURCE" "$NODE_CONFLICT" "$NODE_CONSTRAINT" "$NODE_CONSTRAINT_KIND" "$NODE_CONSTRAINT_SOURCE" "$NODE_ACTIVE" "$NODE_ACTIVE_PATH" "$NODE_MISSING" "$NODE_MISMATCH" "$NODE_PROMPT" "$NODE_STATE" "$NODE_NOTE" "$NODE_SELECTOR_STATUS" "$NODE_CONSTRAINT_STATUS"; fi
+  if (( PY_RELEVANT )); then (( first )) || printf ','; first=0; json_tool python PY_SEL_VALUES PY_SEL_KINDS PY_SEL_SOURCES "$PY_SELECTOR" "$PY_SELECTOR_KIND" "$PY_SELECTOR_SOURCE" "$PY_CONFLICT" "$PY_CONSTRAINT" "$PY_CONSTRAINT_KIND" "$PY_CONSTRAINT_SOURCE" "$PY_ACTIVE" "$PY_ACTIVE_PATH" "$PY_MISSING" "$PY_MISMATCH" "$PY_PROMPT" "$PY_STATE" "$PY_NOTE" "$PY_SELECTOR_STATUS" "$PY_CONSTRAINT_STATUS"; fi
+  if (( GO_RELEVANT )); then (( first )) || printf ','; first=0; json_tool go GO_SEL_VALUES GO_SEL_KINDS GO_SEL_SOURCES "$GO_SELECTOR" "$GO_SELECTOR_KIND" "$GO_SELECTOR_SOURCE" "$GO_CONFLICT" "$GO_CONSTRAINT" "$GO_CONSTRAINT_KIND" "$GO_CONSTRAINT_SOURCE" "$GO_ACTIVE" "$GO_ACTIVE_PATH" "$GO_MISSING" "$GO_MISMATCH" "$GO_PROMPT" "$GO_STATE" "$GO_NOTE" "$GO_SELECTOR_STATUS" "$GO_CONSTRAINT_STATUS"; fi
+  if (( RUST_RELEVANT )); then (( first )) || printf ','; first=0; json_tool rust RUST_SEL_VALUES RUST_SEL_KINDS RUST_SEL_SOURCES "$RUST_SELECTOR" "$RUST_SELECTOR_KIND" "$RUST_SELECTOR_SOURCE" "$RUST_CONFLICT" "$RUST_CONSTRAINT" "$RUST_CONSTRAINT_KIND" "$RUST_CONSTRAINT_SOURCE" "$RUST_ACTIVE" "$RUST_ACTIVE_PATH" "$RUST_MISSING" "$RUST_MISMATCH" "$RUST_PROMPT" "$RUST_STATE" "$RUST_NOTE" "$RUST_SELECTOR_STATUS" "$RUST_CONSTRAINT_STATUS"; fi
+  printf '},"prompt":{"text":'; json_string "$PROMPT_TEXT"; printf ',"state":'; json_string "$PROMPT_STATE"; printf '}}\n'
+}
+
+case "$format" in
+  human) print_human ;;
+  plain) print_plain ;;
+  json) print_json ;;
+  prompt-record) printf '%s\t%s\n' "$PROMPT_STATE" "$PROMPT_TEXT" ;;
+esac

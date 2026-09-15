@@ -11,7 +11,9 @@ tests/**
 .gitignore
 .config/windows-terminal/**
 {{ if eq .chezmoi.os "windows" }}
+.local/bin/terminal
 .local/bin/terminal-*
+.local/lib/terminal-env/**
 .zshenv
 .config/zsh/**
 .config/ghostty/**

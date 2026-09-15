@@ -1,16 +1,31 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-c_reset='\033[0m'; c_dim='\033[2m'; c_ok='\033[38;5;79m'; c_warn='\033[38;5;214m'; c_err='\033[38;5;203m'; c_info='\033[38;5;80m'
-if [[ ! -t 1 || -n ${NO_COLOR:-} ]]; then
-  c_reset='' c_dim='' c_ok='' c_warn='' c_err='' c_info=''
-fi
-say(){ printf '%b%s%b\n' "$c_info" "$*" "$c_reset"; }
-ok(){ printf '%b%s%b\n' "$c_ok" "$*" "$c_reset"; }
+c_reset=''; c_dim=''; c_ok=''; c_warn=''; c_err=''; c_info=''
+terminal_common_color_init(){
+  local mode=${1:-auto} enabled=0
+  case "$mode" in
+    always) enabled=1 ;;
+    never) enabled=0 ;;
+    auto) [[ -t 1 && -z ${NO_COLOR:-} && ${TERM:-} != dumb ]] && enabled=1 ;;
+    *) return 2 ;;
+  esac
+  if (( enabled )); then
+    c_reset='\033[0m'; c_dim='\033[2m'
+    c_ok='\033[38;2;139;181;148m'; c_warn='\033[38;2;214;168;95m'
+    c_err='\033[38;2;224;120;128m'; c_info='\033[38;2;124;196;228m'
+  else
+    c_reset='' c_dim='' c_ok='' c_warn='' c_err='' c_info=''
+  fi
+}
+terminal_common_color_init "${TERMINAL_ENV_COLOR:-auto}"
+progress_quiet(){ [[ ${TERMINAL_ENV_QUIET_PROGRESS:-0} == 1 ]]; }
+say(){ progress_quiet && return 0; printf '%b%s%b\n' "$c_info" "$*" "$c_reset"; }
+ok(){ progress_quiet && return 0; printf '%b%s%b\n' "$c_ok" "$*" "$c_reset"; }
 warn(){ printf '%b%s%b\n' "$c_warn" "$*" "$c_reset" >&2; }
 die(){ printf '%b%s%b\n' "$c_err" "$*" "$c_reset" >&2; exit 1; }
 have(){ command -v "$1" >/dev/null 2>&1; }
-run(){ if [[ ${DRY_RUN:-0} == 1 ]]; then printf '%b+' "$c_dim"; printf ' %q' "$@"; printf '%b\n' "$c_reset"; else "$@"; fi; }
+run(){ if [[ ${DRY_RUN:-0} == 1 ]]; then if ! progress_quiet; then printf '%b+' "$c_dim"; printf ' %q' "$@"; printf '%b\n' "$c_reset"; fi; else "$@"; fi; }
 retry(){ local n=0 max=${RETRY_MAX:-3}; until "$@"; do n=$((n+1)); (( n >= max )) && return 1; sleep $((n*2)); done; }
 ensure_dir(){ [[ ${DRY_RUN:-0} == 1 ]] || mkdir -p "$1"; }
 sha256_file(){ if have sha256sum; then sha256sum "$1" | awk '{print $1}'; elif have shasum; then shasum -a 256 "$1" | awk '{print $1}'; else return 1; fi; }

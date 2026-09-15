@@ -27,11 +27,14 @@ jobs:
             install.sh
             uninstall.sh
             tests/smoke.sh
+            dot_local/bin/executable_terminal
             dot_local/bin/executable_terminal-backup
+            dot_local/bin/executable_terminal-context
             dot_local/bin/executable_terminal-deps
             dot_local/bin/executable_terminal-doctor
             dot_local/bin/executable_terminal-rollback
             dot_local/bin/executable_terminal-update
+            dot_local/lib/terminal-env/output.sh
 
   unix:
     name: ${{ matrix.os }} / ${{ matrix.profile }}

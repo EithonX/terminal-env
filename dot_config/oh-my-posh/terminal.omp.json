@@ -6,19 +6,35 @@
   "shell_integration": true,
   "console_title_template": "{{ .Folder }}{{ if .Root }} · {{ if eq .OS \"windows\" }}admin{{ else }}root{{ end }}{{ end }}{{ if .SSHSession }} · {{ .HostName }}{{ end }}",
   "palette": {
-    "bg": "#090d12",
-    "surface": "#11161d",
-    "surface2": "#171e27",
-    "text": "#e7edf3",
-    "subtle": "#a7b3bf",
-    "muted": "#6c7986",
-    "dim": "#4d5863",
-    "accent": "#7dd7ff",
-    "blue": "#8ab4ff",
-    "violet": "#c5a6f5",
-    "success": "#a6d189",
-    "warning": "#e5c07b",
-    "danger": "#f38ba8"
+    "bg": "#0A0E13",
+    "surface": "#151B22",
+    "surface_active": "#1B232D",
+    "line": "#28323D",
+    "text": "#E6EBF0",
+    "soft": "#A2ACB7",
+    "muted": "#707C88",
+    "accent": "#7CC4E4",
+    "warning": "#D6A85F",
+    "danger": "#E07880",
+    "success": "#8BB594"
+  },
+  "palettes": {
+    "template": "{{ if .Env.NO_COLOR }}plain{{ end }}",
+    "list": {
+      "plain": {
+        "bg": "transparent",
+        "surface": "transparent",
+        "surface_active": "transparent",
+        "line": "transparent",
+        "text": "transparent",
+        "soft": "transparent",
+        "muted": "transparent",
+        "accent": "transparent",
+        "warning": "transparent",
+        "danger": "transparent",
+        "success": "transparent"
+      }
+    }
   },
   "secondary_prompt": {
     "background": "transparent",
@@ -34,14 +50,14 @@
         {
           "type": "session",
           "style": "plain",
-          "foreground": "p:subtle",
-          "template": "{{ if .SSHSession }}<b>{{ .HostName }}</b> {{ end }}"
+          "foreground": "p:soft",
+          "template": "{{ if .SSHSession }}{{ .HostName }}  {{ end }}"
         },
         {
           "type": "path",
           "style": "plain",
           "foreground": "p:accent",
-          "template": "<b>{{ .Path }}</b>",
+          "template": "{{ .Path }}",
           "options": {
             "style": "agnoster_short",
             "max_depth": 4,
@@ -52,8 +68,8 @@
         {
           "type": "git",
           "style": "plain",
-          "foreground": "p:violet",
-          "template": " {{ if .HEAD }} <b>{{ .HEAD }}</b>{{ if gt .Working.Modified 0 }} <p:warning>~{{ .Working.Modified }}</>{{ end }}{{ if gt .Staging.Modified 0 }} <p:warning>+~{{ .Staging.Modified }}</>{{ end }}{{ if gt .Working.Untracked 0 }} <p:subtle>?{{ .Working.Untracked }}</>{{ end }}{{ if gt .Working.Deleted 0 }} <p:danger>-{{ .Working.Deleted }}</>{{ end }}{{ if gt .Staging.Deleted 0 }} <p:danger>+-{{ .Staging.Deleted }}</>{{ end }}{{ if gt .Ahead 0 }} <p:accent>↑{{ .Ahead }}</>{{ end }}{{ if gt .Behind 0 }} <p:warning>↓{{ .Behind }}</>{{ end }}{{ if gt .Working.Unmerged 0 }} <p:danger>!{{ .Working.Unmerged }}</>{{ end }}{{ end }}",
+          "foreground": "p:soft",
+          "template": "{{ if .HEAD }}  {{ .HEAD }}{{ if gt .Staging.Added 0 }} <p:warning>+{{ .Staging.Added }}</>{{ end }}{{ if gt (add .Working.Modified .Staging.Modified) 0 }} <p:warning>~{{ add .Working.Modified .Staging.Modified }}</>{{ end }}{{ if gt .Working.Untracked 0 }} <p:warning>?{{ .Working.Untracked }}</>{{ end }}{{ if gt (add .Working.Deleted .Staging.Deleted) 0 }} <p:warning>-{{ add .Working.Deleted .Staging.Deleted }}</>{{ end }}{{ if gt .Ahead 0 }} <p:soft>↑{{ .Ahead }}</>{{ end }}{{ if gt .Behind 0 }} <p:warning>↓{{ .Behind }}</>{{ end }}{{ if gt .Working.Unmerged 0 }} <p:danger>!{{ .Working.Unmerged }}</>{{ end }}{{ end }}",
           "timeout": 1000,
           "options": {
             "fetch_status": true,
@@ -61,36 +77,14 @@
           }
         },
         {
-          "type": "node",
+          "type": "text",
+          "alias": "project-context",
           "style": "plain",
           "foreground": "p:muted",
-          "template": " {{ if .Full }}󰎙 {{ .Full }}{{ end }}",
-          "placeholder": "",
-          "timeout": 500
-        },
-        {
-          "type": "python",
-          "style": "plain",
-          "foreground": "p:muted",
-          "template": " {{ if .Full }} {{ .Full }}{{ if .Venv }} <p:dim>{{ .Venv }}</>{{ end }}{{ end }}",
-          "placeholder": "",
-          "timeout": 500
-        },
-        {
-          "type": "go",
-          "style": "plain",
-          "foreground": "p:muted",
-          "template": " {{ if .Full }} {{ .Full }}{{ end }}",
-          "placeholder": "",
-          "timeout": 500
-        },
-        {
-          "type": "rust",
-          "style": "plain",
-          "foreground": "p:muted",
-          "template": " {{ if .Full }} {{ .Full }}{{ end }}",
-          "placeholder": "",
-          "timeout": 500
+          "foreground_templates": [
+            "{{ if eq .Env.TERMINAL_ENV_PROJECT_CONTEXT_STATE \"warning\" }}p:warning{{ end }}"
+          ],
+          "template": "{{ if .Env.TERMINAL_ENV_PROJECT_CONTEXT }}  {{ .Env.TERMINAL_ENV_PROJECT_CONTEXT }}{{ end }}"
         },
         {
           "type": "text",
@@ -99,9 +93,20 @@
           "template": " │ "
         },
         {
+          "type": "status",
+          "style": "plain",
+          "foreground": "p:danger",
+          "template": "{{ if .Executed }}{{ .String }} {{ end }}",
+          "options": {
+            "always_enabled": false,
+            "status_template": "{{ .Code }}",
+            "status_separator": "|"
+          }
+        },
+        {
           "type": "text",
           "style": "plain",
-          "foreground": "p:accent",
+          "foreground": "p:text",
           "foreground_templates": [
             "{{ if .Root }}p:danger{{ end }}"
           ],

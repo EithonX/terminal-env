@@ -1,32 +1,79 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 SOURCE="$HOME/.local/share/terminal-env/source"
 CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
 STATE="$HOME/.local/state/terminal-env"
-profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
+managed_profile=$(cat "$STATE/profile" 2>/dev/null || printf server)
 check_only=0
 remote_override=''
 branch_override=''
+format=human
+color=auto
+quiet=0
 
 usage(){ cat <<'USAGE'
-Usage: terminal-update [--check] [--remote NAME] [--branch NAME]
+Usage: terminal update [options]
+       terminal-update [options]
+
+Options:
+  --check                 Check for a source update without applying it.
+  --remote NAME           Use a specific configured Git remote.
+  --branch NAME           Use a specific branch.
+  --format human|plain|json
+  --color auto|always|never
+  --quiet                 Print no result output.
+  -h, --help              Show this help.
 
 Updates Terminal Environment source/config from the installed Git repository.
-External dependency versions are not upgraded here; use terminal-deps separately.
+External dependency versions are reconciled separately with terminal deps sync.
 USAGE
 }
+
 while (($#)); do
   case "$1" in
     --check) check_only=1; shift ;;
-    --remote) remote_override=${2:?missing remote}; shift 2 ;;
-    --branch) branch_override=${2:?missing branch}; shift 2 ;;
+    --remote)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --remote.' >&2; exit 2; }
+      remote_override=$2; shift 2 ;;
+    --remote=*) remote_override=${1#*=}; shift ;;
+    --branch)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --branch.' >&2; exit 2; }
+      branch_override=$2; shift 2 ;;
+    --branch=*) branch_override=${1#*=}; shift ;;
+    --format)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --format.' >&2; exit 2; }
+      format=$2; shift 2 ;;
+    --format=*) format=${1#*=}; shift ;;
+    --color)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --color.' >&2; exit 2; }
+      color=$2; shift 2 ;;
+    --color=*) color=${1#*=}; shift ;;
+    --quiet) quiet=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+case "$format" in human|plain|json) ;; *) printf 'Invalid format: %s\n' "$format" >&2; exit 2 ;; esac
+case "$color" in auto|always|never) ;; *) printf 'Invalid color mode: %s\n' "$color" >&2; exit 2 ;; esac
 
-[[ -d "$SOURCE/.git" ]] || { echo 'No Git-backed source is installed. Reinstall once from your GitHub clone; future terminal-update runs will then use that remote.' >&2; exit 2; }
-[[ -z $(git -C "$SOURCE" status --porcelain) ]] || { echo 'Installed source has local changes; refusing to overwrite them.' >&2; exit 2; }
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ui_lib="$script_dir/../lib/terminal-env/output.sh"
+[[ -r $ui_lib ]] || { printf 'Terminal Environment output library is missing: %s\n' "$ui_lib" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$ui_lib"
+te_ui_init "$format" "$color" || { printf '%s\n' 'Could not initialize output mode.' >&2; exit 2; }
+
+fail_precondition(){ printf '%s\n' "$1" >&2; exit 2; }
+run_progress(){
+  if (( quiet )); then "$@" >/dev/null
+  else "$@" 1>&2
+  fi
+}
+short_ref(){ printf '%.12s' "$1"; }
+
+[[ -d "$SOURCE/.git" ]] || fail_precondition 'No Git-backed source is installed. Reinstall once from your GitHub clone; future terminal update runs will then use that remote.'
+[[ -z $(git -C "$SOURCE" status --porcelain) ]] || fail_precondition 'Installed source has local changes; refusing to overwrite them.'
 
 current_branch=$(git -C "$SOURCE" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 upstream=$(git -C "$SOURCE" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
@@ -37,50 +84,112 @@ fi
 if [[ -n $branch_override ]]; then branch=$branch_override
 elif [[ -n $upstream ]]; then branch=${upstream#*/}
 elif [[ -n $current_branch ]]; then branch=$current_branch
-else { echo 'Cannot determine update branch; pass --branch.' >&2; exit 2; }
+else fail_precondition 'Cannot determine update branch; pass --branch.'
 fi
+[[ -n $remote && $remote != -* ]] || fail_precondition 'Git remote name is invalid.'
+git -C "$SOURCE" check-ref-format --branch "$branch" >/dev/null 2>&1 || fail_precondition "Git branch '$branch' is invalid."
+git -C "$SOURCE" remote get-url -- "$remote" >/dev/null 2>&1 || fail_precondition "Git remote '$remote' is not configured."
 
-git -C "$SOURCE" remote get-url "$remote" >/dev/null 2>&1 || { echo "Git remote '$remote' is not configured." >&2; exit 2; }
-git -C "$SOURCE" fetch --prune "$remote" "$branch"
+if (( ! quiet )) && [[ $format == human ]]; then
+  te_ui_title update
+  te_ui_meta "Checking $remote/$branch"
+fi
+run_progress git -C "$SOURCE" fetch --prune "$remote" "$branch"
 old=$(git -C "$SOURCE" rev-parse HEAD)
 latest=$(git -C "$SOURCE" rev-parse "$remote/$branch")
+count=0
+if [[ $old != "$latest" ]]; then
+  git -C "$SOURCE" merge-base --is-ancestor "$old" "$latest" >/dev/null 2>&1 || fail_precondition 'Remote branch cannot be fast-forwarded from the current source; refusing update.'
+  count=$(git -C "$SOURCE" rev-list --count "$old..$latest" 2>/dev/null || printf 0)
+  [[ $count =~ ^[0-9]+$ ]] || count=0
+fi
+old_versions=$(git -C "$SOURCE" rev-parse "$old:versions.env" 2>/dev/null || printf missing)
+latest_versions=$(git -C "$SOURCE" rev-parse "$latest:versions.env" 2>/dev/null || printf missing)
+deps_changed=0
+[[ $old_versions == "$latest_versions" ]] || deps_changed=1
+
+render_result(){
+  local status=$1 action=$2 old_short latest_short deps_json
+  (( quiet )) && return
+  old_short=$(short_ref "$old")
+  latest_short=$(short_ref "$latest")
+  case "$format" in
+    human)
+      case "$status" in
+        up-to-date)
+          te_ui_outcome success "Up to date · $old_short · $remote/$branch"
+          ;;
+        available)
+          te_ui_outcome accent "Update available · $count commit(s) · $old_short → $latest_short"
+          te_ui_meta "$remote/$branch"
+          if (( deps_changed )); then
+            te_ui_section Attention
+            te_ui_attention warn Dependencies 'the available source changes dependency pins; sync after updating'
+          fi
+          ;;
+        updated)
+          te_ui_section Updated
+          te_ui_row Source "$old_short → $latest_short"
+          te_ui_row Branch "$remote/$branch"
+          if (( deps_changed )); then
+            te_ui_section Attention
+            te_ui_attention warn Dependencies 'dependency manifest changed; run terminal deps sync'
+          fi
+          te_ui_outcome success "Updated · $latest_short"
+          ;;
+      esac
+      ;;
+    plain)
+      printf 'update\t%s\t%s\t%s\t%d\t%s\t%s\t%d\n' \
+        "$status" "$old" "$latest" "$count" "$(te_ui_clean_text "$remote")" "$(te_ui_clean_text "$branch")" "$deps_changed"
+      ;;
+    json)
+      if (( deps_changed )); then deps_json=true; else deps_json=false; fi
+      printf '{"command":"update","action":%s,"status":%s,"remote":%s,"branch":%s,"current":%s,"latest":%s,"commit_count":%d,"dependencies_changed":%s}\n' \
+        "$(te_ui_json_string "$action")" \
+        "$(te_ui_json_string "$status")" \
+        "$(te_ui_json_string "$(te_ui_clean_text "$remote")")" \
+        "$(te_ui_json_string "$(te_ui_clean_text "$branch")")" \
+        "$(te_ui_json_string "$old")" \
+        "$(te_ui_json_string "$latest")" \
+        "$count" "$deps_json"
+      ;;
+  esac
+}
+
 if [[ $old == "$latest" ]]; then
-  echo "Already up to date: ${old:0:12} ($remote/$branch)"
+  render_result up-to-date "$([[ $check_only == 1 ]] && printf check || printf update)"
   exit 0
 fi
 if (( check_only )); then
-  count=$(git -C "$SOURCE" rev-list --count "$old..$latest" 2>/dev/null || echo '?')
-  echo "Update available: ${old:0:12} -> ${latest:0:12} ($count commit(s), $remote/$branch)"
+  render_result available check
   exit 0
 fi
 
-old_versions=$(git -C "$SOURCE" rev-parse "$old:versions.env" 2>/dev/null || echo missing)
 rollback_update() {
   local rc=$?
   trap - ERR INT TERM
-  echo 'Source update failed; restoring previous known-good revision/configuration.' >&2
+  printf '%s\n' 'Could not update Terminal Environment.' >&2
+  printf '%s\n' 'The previous source revision and managed configuration are being restored.' >&2
   git -C "$SOURCE" reset --hard "$old" >/dev/null 2>&1 || true
   if command -v chezmoi >/dev/null 2>&1; then
     chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
   fi
-  PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
+  PROFILE="$managed_profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
   exit "$rc"
 }
 trap rollback_update ERR INT TERM
 
-git -C "$SOURCE" merge --ff-only "$latest"
-bash "$SOURCE/tests/smoke.sh" --source-only
-chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
-PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh"
-terminal-doctor --quick
+run_progress git -C "$SOURCE" merge --ff-only "$latest"
+run_progress bash "$SOURCE/tests/smoke.sh" --source-only
+run_progress chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
+run_progress env PROFILE="$managed_profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh"
+terminal-doctor --quick --quiet
 printf '%s\n' "$old" > "$STATE/previous-commit"
-new_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
-if [[ $old_versions != "$new_versions" ]]; then
+if (( deps_changed )); then
   printf '%s\n' "$(git -C "$SOURCE" rev-parse HEAD)" > "$STATE/deps-pending"
-  echo 'Source updated successfully. Dependency manifest also changed.'
-  echo 'Run: terminal-deps sync'
 else
   rm -f "$STATE/deps-pending"
-  echo "Source updated successfully. Previous revision: $old"
 fi
 trap - ERR INT TERM
+render_result updated update

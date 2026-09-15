@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+usage(){ cat <<'USAGE'
+Terminal Environment
+
+Usage
+  terminal <command> [options]
+
+Commands
+  doctor      Check the environment
+  update      Update managed configuration
+  deps        Inspect or synchronize dependencies
+  context     Explain project context and toolchains
+  backup      Create a manual backup
+  rollback    Restore a previous managed revision
+  version     Show installed source identity
+
+Run `terminal <command> --help` for details.
+USAGE
+}
+
+fail_usage(){
+  printf '%s\n' "$1" >&2
+  usage >&2
+  exit 2
+}
+
+resolve_command(){
+  local name=$1 candidate="$script_dir/terminal-$1"
+  if [[ -x $candidate ]]; then printf '%s\n' "$candidate"; return 0; fi
+  command -v "terminal-$name" 2>/dev/null || return 1
+}
+
+run_command(){
+  local name=$1 target
+  shift
+  target=$(resolve_command "$name") || { printf 'Managed command is missing: terminal-%s\n' "$name" >&2; exit 2; }
+  exec "$target" "$@"
+}
+
+version_command(){
+  local format=human color=auto quiet=0 source revision='' branch='' profile source_kind=static
+  while (($#)); do
+    case "$1" in
+      --format) (($# >= 2)) || { printf '%s\n' 'Missing value for --format.' >&2; exit 2; }; format=$2; shift 2 ;;
+      --format=*) format=${1#*=}; shift ;;
+      --color) (($# >= 2)) || { printf '%s\n' 'Missing value for --color.' >&2; exit 2; }; color=$2; shift 2 ;;
+      --color=*) color=${1#*=}; shift ;;
+      --quiet) quiet=1; shift ;;
+      -h|--help)
+        cat <<'USAGE'
+Usage: terminal version [options]
+
+Options:
+  --format human|plain|json
+  --color auto|always|never
+  --quiet                 Print no result output.
+  -h, --help              Show this help.
+USAGE
+        return 0 ;;
+      *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
+    esac
+  done
+  case "$format" in human|plain|json) ;; *) printf 'Invalid format: %s\n' "$format" >&2; exit 2 ;; esac
+  case "$color" in auto|always|never) ;; *) printf 'Invalid color mode: %s\n' "$color" >&2; exit 2 ;; esac
+  (( quiet )) && return 0
+
+  source="$HOME/.local/share/terminal-env/source"
+  profile=$(cat "$HOME/.local/state/terminal-env/profile" 2>/dev/null || printf unknown)
+  if command -v git >/dev/null 2>&1 && [[ -d $source/.git ]]; then
+    revision=$(git -C "$source" rev-parse HEAD 2>/dev/null || true)
+    if [[ -n $revision ]]; then
+      source_kind=git
+      branch=$(git -C "$source" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    fi
+  fi
+
+  local ui_lib="$script_dir/../lib/terminal-env/output.sh"
+  [[ -r $ui_lib ]] || { printf 'Terminal Environment output library is missing: %s\n' "$ui_lib" >&2; exit 2; }
+  # shellcheck disable=SC1090
+  source "$ui_lib"
+  te_ui_init "$format" "$color" || { printf '%s\n' 'Could not initialize output mode.' >&2; exit 2; }
+  profile=$(te_ui_clean_text "$profile")
+  branch=$(te_ui_clean_text "$branch")
+  revision=$(te_ui_clean_text "$revision")
+
+  case "$format" in
+    human)
+      te_ui_title version
+      if [[ -n $revision ]]; then te_ui_row Source "${revision:0:12}"; else te_ui_row Source 'static checkout'; fi
+      [[ -n $branch ]] && te_ui_row Branch "$branch"
+      te_ui_row Profile "$profile"
+      ;;
+    plain)
+      printf 'version\t%s\t%s\t%s\t%s\n' "$source_kind" "$revision" "$branch" "$profile"
+      ;;
+    json)
+      printf '{"command":"version","source_kind":%s,"revision":%s,"branch":%s,"profile":%s}\n' \
+        "$(te_ui_json_string "$source_kind")" "$(te_ui_json_string "$revision")" \
+        "$(te_ui_json_string "$branch")" "$(te_ui_json_string "$profile")"
+      ;;
+  esac
+}
+
+compact_version(){
+  local source="$HOME/.local/share/terminal-env/source" revision='static'
+  if command -v git >/dev/null 2>&1 && [[ -d $source/.git ]]; then
+    revision=$(git -C "$source" rev-parse --short=12 HEAD 2>/dev/null || printf static)
+  fi
+  printf 'Terminal Environment source %s\n' "$revision"
+}
+
+(($#)) || { usage; exit 0; }
+case "$1" in
+  -h|--help|help) usage; exit 0 ;;
+  -V|--version) compact_version; exit 0 ;;
+  doctor|update|context|backup|rollback)
+    command=$1; shift; run_command "$command" "$@" ;;
+  deps)
+    shift
+    if (($# == 0)); then set -- status
+    elif [[ $1 == check ]]; then shift; set -- status "$@"
+    fi
+    run_command deps "$@"
+    ;;
+  version)
+    shift; version_command "$@" ;;
+  *) fail_usage "Unknown command: $1" ;;
+esac

@@ -1,22 +1,90 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 with_history=0
-usage(){ printf '%s\n' 'Usage: terminal-backup [--with-history]'; }
+format=path
+color=auto
+quiet=0
+
+usage(){ cat <<'USAGE'
+Usage: terminal backup [options]
+       terminal-backup [options]
+
+Options:
+  --with-history          Include managed shell/history data.
+  --format human|plain|json
+  --color auto|always|never
+  --quiet                 Print no result output.
+  -h, --help              Show this help.
+
+Without --format, stdout remains the created archive path for compatibility.
+USAGE
+}
+
 while (($#)); do
   case "$1" in
     --with-history) with_history=1; shift ;;
+    --format)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --format.' >&2; exit 2; }
+      format=$2; shift 2 ;;
+    --format=*) format=${1#*=}; shift ;;
+    --color)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --color.' >&2; exit 2; }
+      color=$2; shift 2 ;;
+    --color=*) color=${1#*=}; shift ;;
+    --quiet) quiet=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+case "$format" in path|human|plain|json) ;; *) printf 'Invalid format: %s\n' "$format" >&2; exit 2 ;; esac
+case "$color" in auto|always|never) ;; *) printf 'Invalid color mode: %s\n' "$color" >&2; exit 2 ;; esac
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ui_lib="$script_dir/../lib/terminal-env/output.sh"
+[[ -r $ui_lib ]] || { printf 'Terminal Environment output library is missing: %s\n' "$ui_lib" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$ui_lib"
+ui_format=$format
+[[ $ui_format == path ]] && ui_format=plain
+te_ui_init "$ui_format" "$color" || { printf '%s\n' 'Could not initialize output mode.' >&2; exit 2; }
+
 root="$HOME/.local/state/terminal-env/backups/manual"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 out="$root/manual-$stamp.tar.gz"
-mkdir -p "$root"; chmod 700 "$root"
+if [[ -e $out ]]; then out="$root/manual-$stamp-$$.tar.gz"; fi
+mkdir -p "$root"
+chmod 700 "$root"
 items=()
-for x in .zshenv .config/zsh .config/oh-my-posh .config/atuin .config/ghostty .config/tmux .config/terminal-env; do [[ -e "$HOME/$x" ]] && items+=("$x"); done
-if (( with_history )); then for x in .local/state/zsh .local/share/atuin .local/share/deja; do [[ -e "$HOME/$x" ]] && items+=("$x"); done; fi
-((${#items[@]})) || { echo 'Nothing to back up.'; exit 1; }
+for x in .zshenv .config/zsh .config/oh-my-posh .config/atuin .config/ghostty .config/tmux .config/terminal-env; do
+  [[ -e "$HOME/$x" ]] && items+=("$x")
+done
+if (( with_history )); then
+  for x in .local/state/zsh .local/share/atuin .local/share/deja; do
+    [[ -e "$HOME/$x" ]] && items+=("$x")
+  done
+fi
+((${#items[@]})) || { printf '%s\n' 'Nothing to back up.' >&2; exit 1; }
 tar -C "$HOME" -czf "$out" "${items[@]}"
 chmod 600 "$out"
-echo "$out"
+bytes=$(wc -c < "$out" | tr -d ' ')
+
+(( quiet )) && exit 0
+case "$format" in
+  path) printf '%s\n' "$out" ;;
+  human)
+    te_ui_title backup
+    te_ui_section Created
+    te_ui_row Archive "$out"
+    if (( with_history )); then te_ui_row Scope 'configuration + history'; else te_ui_row Scope configuration; fi
+    te_ui_row Size "$bytes bytes"
+    te_ui_outcome success 'Backup created'
+    ;;
+  plain)
+    printf 'backup\tcreated\t%s\t%d\t%d\n' "$(te_ui_clean_text "$out")" "$bytes" "$with_history"
+    ;;
+  json)
+    printf '{"command":"backup","status":"created","archive":%s,"bytes":%d,"with_history":%s}\n' \
+      "$(te_ui_json_string "$(te_ui_clean_text "$out")")" "$bytes" "$([[ $with_history == 1 ]] && printf true || printf false)"
+    ;;
+esac

@@ -1,21 +1,12 @@
 # Terminal Environment
 
-A fast, opinionated terminal setup for Windows, macOS, and Ubuntu/Debian.
+A managed terminal environment for Windows, macOS, and Ubuntu/Debian.
 
-Good defaults, native shells, useful history, real completion, and no giant shell framework.
-
-## What you get
-
-- **Windows:** PowerShell 7 + PSReadLine + Atuin + Windows Terminal.
-- **Linux/macOS:** Zsh + smart history/completion suggestions + Atuin + fzf-tab.
-- **Everywhere:** Oh My Posh, fzf, zoxide, a restrained theme, diagnostics, rollback, and Git-backed updates.
-- Core commands stay core commands. `ls` is still `ls`; `rm` is still `rm`.
-- Shell startup does not pull Git, install packages, or phone home.
-- Optional pieces fail open. A missing prompt or fuzzy finder should never brick your shell.
+PowerShell 7 or Zsh, with managed tools, history, completion, diagnostics, updates, and recovery.
 
 ## Install
 
-One command. The bootstrap acquires only the prerequisites needed to fetch the repository, then hands off to the normal transactional installer.
+The bootstrap acquires only the prerequisites needed to fetch the repository, then hands off to the transactional installer.
 
 ### Windows 10/11
 
@@ -51,6 +42,32 @@ Set `TERMINAL_ENV_PROFILE`, `TERMINAL_ENV_BRANCH`, or `TERMINAL_ENV_REPO` before
 
 If you do not want to execute a network-fetched bootstrap directly, download it for inspection or clone the repository and run `install.ps1` / `install.sh` locally.
 
+The full installer follows `Preflight → Plan → Apply → Verify → Finish`. Local conflicts and unsupported prerequisites fail during preflight before package provisioning. The transaction is marked complete only after the managed configuration passes doctor verification; non-minimal installs also verify the pinned dependency state. A verification failure restores the managed files captured before the install.
+
+Unix installs support `--format human|plain|json`, `--color auto|always|never`, `--quiet`, and `--verbose`. The PowerShell installer exposes the corresponding `-Format`, `-Color`, `-Quiet`, and `-Verbose` parameters. `--dry-run` / `-DryRun` stays read-only, and JSON result output is kept separate from child-tool progress.
+
+## What you get
+
+- **Windows:** PowerShell 7 + PSReadLine + Atuin + Windows Terminal.
+- **Linux/macOS:** Zsh + smart history/completion suggestions + Atuin + fzf-tab.
+- **Everywhere:** Oh My Posh, fzf, zoxide, a restrained theme, diagnostics, rollback, and Git-backed updates.
+- Core commands stay core commands. `ls` is still `ls`; `rm` is still `rm`.
+- Shell startup does not pull Git, install packages, or phone home.
+- Optional pieces fail open. A missing prompt or fuzzy finder should never brick your shell.
+
+## Everyday commands
+
+```sh
+terminal doctor
+terminal update --check
+terminal deps status
+terminal context
+terminal backup
+terminal rollback --dry-run
+```
+
+`terminal --help` is the primary command surface. The existing `terminal-doctor`, `terminal-update`, `terminal-deps`, `terminal-context`, `terminal-backup`, and `terminal-rollback` names remain compatibility shims. `terminal deps check` is an alias of `terminal deps status`. `terminal version` reports the installed source revision when the managed source is Git-backed rather than inventing a separate release version.
+
 ## Daily keys
 
 | Key | Action |
@@ -70,15 +87,74 @@ Zsh inline suggestions use both command history and the real Zsh completion syst
 Repository changes and dependency changes are deliberately separate:
 
 ```sh
-terminal-update --check
-terminal-update
-terminal-deps status
-terminal-deps sync
+terminal update --check
+terminal update
+terminal deps status
+terminal deps sync
 ```
 
 The same long options work on Unix and PowerShell. Native PowerShell forms such as `-Check` remain accepted.
 
-`terminal-update` fast-forwards the installed Git source and applies config only. `terminal-deps sync` reconciles third-party tools to the versions pinned in `versions.env`.
+`terminal update` fast-forwards the installed Git source and applies config only. It refuses non-fast-forward source movement and local modifications, and restores the previously applied revision/configuration if validation or apply fails. `terminal update --format plain|json` keeps result data separate from Git/validation progress. `terminal deps sync` reconciles third-party tools to the versions pinned in `versions.env`.
+
+`terminal deps status` is exception-oriented like doctor: a healthy environment collapses to one line, while mismatches expand into `Attention`. Use `--verbose`, `--format plain`, or `--format json` when you need the complete dependency comparison.
+
+## Project context
+
+Runtime information appears in the prompt only when the project provides authoritative version or compatibility metadata. Discovery stops at the Git repository boundary; outside Git it stays in the current directory. Conflicting selectors are reported instead of silently choosing one.
+
+Inspect the resolved values and their sources with:
+
+```sh
+terminal context
+terminal context --format json
+```
+
+Node, Python, Go, and Rust context distinguish project selectors and compatibility constraints from the executable that is active on `PATH`. Prompt resolution is local-only and does not download or install toolchains.
+
+## Diagnostics
+
+`terminal doctor` is exception-oriented by default: a healthy run collapses to a short summary, while warnings and failures expand into an `Attention` section. Use `--verbose` when you want every successful check.
+
+```sh
+terminal doctor
+terminal doctor --verbose
+terminal doctor --format plain
+terminal doctor --format json
+```
+
+Human output uses color only on an interactive terminal by default and respects `NO_COLOR` and `TERM=dumb`. `--color auto|always|never` makes the choice explicit. Plain and JSON output never contain ANSI styling.
+
+## Backups and recovery
+
+```sh
+terminal backup
+terminal backup --with-history
+terminal rollback --dry-run
+terminal rollback
+```
+
+`terminal backup` keeps its original script-friendly contract: without `--format`, stdout is only the created archive path. Use `--format human|plain|json` for an explicit presentation contract. Manual backups are stored separately from installer transaction snapshots and are never auto-pruned.
+
+Rollback shows the current and target revisions before mutation and asks for confirmation. Noninteractive rollback requires `--yes`; `--dry-run` only shows the plan. A failed rollback attempts to restore the revision/configuration that was active before the command started. If the target changes `versions.env`, the source rollback completes but marks dependencies for a separate `terminal deps sync`.
+
+Uninstall is intentionally kept outside the everyday `terminal` command tree. Run it from the managed source so the recovery script remains available even if managed shell commands are damaged.
+
+macOS / Linux:
+
+```sh
+~/.local/share/terminal-env/source/uninstall.sh --dry-run
+~/.local/share/terminal-env/source/uninstall.sh
+```
+
+Windows:
+
+```powershell
+pwsh -File "$HOME\.local\share\terminal-env\source\uninstall.ps1" --dry-run
+pwsh -File "$HOME\.local\share\terminal-env\source\uninstall.ps1"
+```
+
+Uninstall shows its plan before mutation and requires confirmation. Redirected/noninteractive use requires `--yes`. The original pre-install snapshot is restored by default; if that restore point is missing or intentionally unwanted, `--no-restore` is an explicit destructive override. System packages and history databases are preserved.
 
 ## Profiles
 
@@ -92,9 +168,9 @@ The same long options work on Unix and PowerShell. Native PowerShell forms such 
 - **macOS:** Homebrew; Ghostty is installed as a cask.
 - **Ubuntu/Debian:** `apt`. Ghostty is optional and only installed when the distro provides it; the shell works in any terminal.
 
-Run `terminal-doctor` after installation if anything looks wrong.
+Run `terminal doctor` after installation if anything looks wrong.
 
-## Project notes
+## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Security](SECURITY.md)

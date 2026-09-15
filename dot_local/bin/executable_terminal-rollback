@@ -1,32 +1,153 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-if (($#)); then
-  case "$1" in
-    -h|--help) printf '%s\n' 'Usage: terminal-rollback'; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; printf '%s\n' 'Usage: terminal-rollback' >&2; exit 2 ;;
-  esac
-fi
+
 SOURCE="$HOME/.local/share/terminal-env/source"
 CONFIG="$HOME/.config/terminal-env/chezmoi.toml"
 STATE="$HOME/.local/state/terminal-env"
-prev=$(cat "$STATE/previous-commit" 2>/dev/null || true)
-[[ -n $prev && -d "$SOURCE/.git" ]] || { echo 'No previous Git revision recorded.' >&2; exit 2; }
-[[ -z $(git -C "$SOURCE" status --porcelain) ]] || { echo 'Installed source has local changes; refusing rollback.' >&2; exit 2; }
-cur=$(git -C "$SOURCE" rev-parse HEAD)
-profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
-cur_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
+format=human
+color=auto
+quiet=0
+yes=0
+dry=0
 
-git -C "$SOURCE" reset --hard "$prev"
-bash "$SOURCE/tests/smoke.sh" --source-only
-chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
-PROFILE="$profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh"
+usage(){ cat <<'USAGE'
+Usage: terminal rollback [options]
+       terminal-rollback [options]
+
+Options:
+  --yes                    Skip interactive confirmation.
+  --dry-run                Show the rollback target without changing anything.
+  --format human|plain|json
+  --color auto|always|never
+  --quiet                  Print no result output; requires --yes to apply.
+  -h, --help               Show this help.
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --yes) yes=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    --format)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --format.' >&2; exit 2; }
+      format=$2; shift 2 ;;
+    --format=*) format=${1#*=}; shift ;;
+    --color)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --color.' >&2; exit 2; }
+      color=$2; shift 2 ;;
+    --color=*) color=${1#*=}; shift ;;
+    --quiet) quiet=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$format" in human|plain|json) ;; *) printf 'Invalid format: %s\n' "$format" >&2; exit 2 ;; esac
+case "$color" in auto|always|never) ;; *) printf 'Invalid color mode: %s\n' "$color" >&2; exit 2 ;; esac
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ui_lib="$script_dir/../lib/terminal-env/output.sh"
+[[ -r $ui_lib ]] || { printf 'Terminal Environment output library is missing: %s\n' "$ui_lib" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$ui_lib"
+te_ui_init "$format" "$color" || { printf '%s\n' 'Could not initialize output mode.' >&2; exit 2; }
+
+fail_precondition(){ printf '%s\n' "$1" >&2; exit 2; }
+run_progress(){
+  if (( quiet )); then "$@" >/dev/null
+  else "$@" 1>&2
+  fi
+}
+short_ref(){ printf '%.12s' "$1"; }
+
+prev=$(cat "$STATE/previous-commit" 2>/dev/null || true)
+[[ -n $prev && -d "$SOURCE/.git" ]] || fail_precondition 'No previous Git revision recorded.'
+[[ $prev =~ ^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$ ]] || fail_precondition 'Recorded rollback revision is invalid.'
+git -C "$SOURCE" cat-file -e "$prev^{commit}" 2>/dev/null || fail_precondition 'Recorded rollback revision is not available in the installed source.'
+[[ -z $(git -C "$SOURCE" status --porcelain) ]] || fail_precondition 'Installed source has local changes; refusing rollback.'
+cur=$(git -C "$SOURCE" rev-parse HEAD)
+[[ $cur != "$prev" ]] || fail_precondition 'The recorded rollback revision is already active.'
+managed_profile=$(cat "$STATE/profile" 2>/dev/null || printf server)
+cur_versions=$(git -C "$SOURCE" rev-parse "$cur:versions.env" 2>/dev/null || printf missing)
+target_versions=$(git -C "$SOURCE" rev-parse "$prev:versions.env" 2>/dev/null || printf missing)
+deps_changed=0
+[[ $cur_versions == "$target_versions" ]] || deps_changed=1
+
+render_plan(){
+  (( quiet )) && return
+  [[ $format == human ]] || return 0
+  te_ui_title rollback
+  te_ui_section Plan
+  te_ui_row Current "$(short_ref "$cur")"
+  te_ui_row Target "$(short_ref "$prev")"
+  te_ui_meta 'Managed configuration will be replaced. Local secrets and history are not touched.'
+}
+
+render_result(){
+  local status=$1 deps_json
+  (( quiet )) && return
+  case "$format" in
+    human)
+      case "$status" in
+        planned) te_ui_outcome accent 'Dry run complete · no changes applied' ;;
+        cancelled) te_ui_outcome text 'Cancelled · no changes applied' ;;
+        rolled-back)
+          if (( deps_changed )); then
+            te_ui_section Attention
+            te_ui_attention warn Dependencies 'dependency manifest differs; run terminal deps sync'
+          fi
+          te_ui_outcome success "Rolled back · $(short_ref "$prev")"
+          ;;
+      esac
+      ;;
+    plain)
+      printf 'rollback\t%s\t%s\t%s\t%d\n' "$status" "$cur" "$prev" "$deps_changed"
+      ;;
+    json)
+      if (( deps_changed )); then deps_json=true; else deps_json=false; fi
+      printf '{"command":"rollback","status":%s,"current":%s,"target":%s,"dependencies_changed":%s}\n' \
+        "$(te_ui_json_string "$status")" "$(te_ui_json_string "$cur")" "$(te_ui_json_string "$prev")" "$deps_json"
+      ;;
+  esac
+}
+
+render_plan
+if (( dry )); then
+  render_result planned
+  exit 0
+fi
+if (( ! yes )); then
+  (( ! quiet )) || fail_precondition 'Rollback requires --yes when --quiet is used.'
+  [[ $format == human ]] || fail_precondition 'Rollback requires --yes for plain or JSON output.'
+  [[ -t 0 ]] || fail_precondition 'Rollback requires --yes when stdin is not interactive.'
+  printf 'Continue? [y/N] ' >&2
+  IFS= read -r reply || reply=''
+  case "$reply" in y|Y|yes|YES|Yes) ;; *) render_result cancelled; exit 0 ;; esac
+fi
+
+rollback_failure(){
+  local rc=$?
+  trap - ERR INT TERM
+  printf '%s\n' 'Could not complete rollback.' >&2
+  printf '%s\n' 'The previously active source revision and managed configuration are being restored.' >&2
+  git -C "$SOURCE" reset --hard "$cur" >/dev/null 2>&1 || true
+  if command -v chezmoi >/dev/null 2>&1; then
+    chezmoi --source "$SOURCE" --config "$CONFIG" apply --force >/dev/null 2>&1 || true
+  fi
+  PROFILE="$managed_profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh" >/dev/null 2>&1 || true
+  exit "$rc"
+}
+trap rollback_failure ERR INT TERM
+
+run_progress git -C "$SOURCE" reset --hard "$prev"
+run_progress bash "$SOURCE/tests/smoke.sh" --source-only
+run_progress chezmoi --source "$SOURCE" --config "$CONFIG" apply --force
+run_progress env PROFILE="$managed_profile" SYNC_PLUGINS=0 bash "$SOURCE/scripts/build-zsh-plugins.sh"
+terminal-doctor --quick --quiet
 printf '%s\n' "$cur" > "$STATE/previous-commit"
-new_versions=$(git -C "$SOURCE" rev-parse HEAD:versions.env 2>/dev/null || echo missing)
-if [[ $cur_versions != "$new_versions" ]]; then
+if (( deps_changed )); then
   printf '%s\n' "$prev" > "$STATE/deps-pending"
-  echo "Rolled source/config back to $prev. Dependency manifest differs; run: terminal-deps sync"
 else
   rm -f "$STATE/deps-pending"
-  echo "Rolled back to $prev"
 fi
-terminal-doctor --quick || true
+trap - ERR INT TERM
+render_result rolled-back

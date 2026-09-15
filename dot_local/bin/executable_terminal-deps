@@ -1,90 +1,272 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 SOURCE="$HOME/.local/share/terminal-env/source"
 STATE="$HOME/.local/state/terminal-env"
-[[ -r "$SOURCE/versions.env" ]] || { echo 'Installed dependency manifest is missing.' >&2; exit 2; }
-# shellcheck disable=SC1091
-source "$SOURCE/versions.env"
-profile=$(cat "$STATE/profile" 2>/dev/null || echo server)
 action=status
-dry=0
 action_set=0
+dry=0
+format=human
+color=auto
+verbose=0
+quiet=0
 
 usage(){ cat <<'USAGE'
-Usage: terminal-deps [status|sync] [--dry-run]
+Usage: terminal deps [status|sync] [options]
+       terminal-deps [status|sync] [options]
 
-  status    Compare installed managed tools/plugins with versions.env.
-  sync      Reconcile dependencies to versions.env without updating repo source.
+Actions:
+  status                   Compare managed dependencies with versions.env.
+  sync                     Reconcile dependencies without updating repo source.
+
+Options:
+  --dry-run                Show sync work without changing dependencies.
+  --format human|plain|json
+  --color auto|always|never
+  --verbose                Show matching dependencies in human status output.
+  --quiet                  Print no result output.
+  -h, --help               Show this help.
 USAGE
 }
 
 while (($#)); do
   case "$1" in
     status|sync)
-      (( action_set == 0 )) || { echo "Unexpected argument: $1" >&2; usage >&2; exit 2; }
+      (( action_set == 0 )) || { printf 'Unexpected argument: %s\n' "$1" >&2; usage >&2; exit 2; }
       action=$1; action_set=1; shift ;;
     --dry-run) dry=1; shift ;;
+    --verbose) verbose=1; shift ;;
+    --quiet) quiet=1; shift ;;
+    --format)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --format.' >&2; exit 2; }
+      format=$2; shift 2 ;;
+    --format=*) format=${1#*=}; shift ;;
+    --color)
+      (($# >= 2)) || { printf '%s\n' 'Missing value for --color.' >&2; exit 2; }
+      color=$2; shift 2 ;;
+    --color=*) color=${1#*=}; shift ;;
     -h|--help|help) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
-if (( dry )) && [[ $action != sync ]]; then echo '--dry-run is only valid with sync.' >&2; exit 2; fi
+case "$format" in human|plain|json) ;; *) printf 'Invalid format: %s\n' "$format" >&2; exit 2 ;; esac
+case "$color" in auto|always|never) ;; *) printf 'Invalid color mode: %s\n' "$color" >&2; exit 2 ;; esac
+if (( dry )) && [[ $action != sync ]]; then printf '%s\n' '--dry-run is only valid with sync.' >&2; exit 2; fi
 
-status_deps(){
-  if [[ $profile == minimal ]]; then echo 'Minimal profile intentionally omits optional managed dependencies.'; return 0; fi
-  local bad=0 actual head tag
-  printf 'Terminal Environment dependencies\n\n'
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ui_lib="$script_dir/../lib/terminal-env/output.sh"
+[[ -r $ui_lib ]] || { printf 'Terminal Environment output library is missing: %s\n' "$ui_lib" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$ui_lib"
+te_ui_init "$format" "$color" || { printf '%s\n' 'Could not initialize output mode.' >&2; exit 2; }
+
+[[ -r "$SOURCE/versions.env" ]] || { printf '%s\n' 'Installed dependency manifest is missing.' >&2; exit 2; }
+# shellcheck disable=SC1091
+source "$SOURCE/versions.env"
+profile=$(cat "$STATE/profile" 2>/dev/null || printf server)
+
+DEP_ID=()
+DEP_STATUS=()
+DEP_CATEGORY=()
+DEP_LABEL=()
+DEP_INSTALLED=()
+DEP_PINNED=()
+DEP_DETAIL=()
+dep_n=0
+mismatch_n=0
+state_attention=0
+
+add_dep(){
+  local id=$1 status=$2 category=$3 label=$4 installed=${5-} pinned=${6-} detail=${7-}
+  DEP_ID[$dep_n]=$(te_ui_clean_text "$id")
+  DEP_STATUS[$dep_n]=$status
+  DEP_CATEGORY[$dep_n]=$(te_ui_clean_text "$category")
+  DEP_LABEL[$dep_n]=$(te_ui_clean_text "$label")
+  DEP_INSTALLED[$dep_n]=$(te_ui_clean_text "$installed")
+  DEP_PINNED[$dep_n]=$(te_ui_clean_text "$pinned")
+  DEP_DETAIL[$dep_n]=$(te_ui_clean_text "$detail")
+  [[ $status == match ]] || mismatch_n=$((mismatch_n+1))
+  dep_n=$((dep_n+1))
+}
+
+tool_version(){
+  local line version
+  line=$(command "$1" --version 2>/dev/null | head -n1 || true)
+  version=$(printf '%s\n' "$line" | awk 'match($0, /[vV]?[0-9]+([.][0-9]+)+([.-][0-9A-Za-z]+)*/){print substr($0,RSTART,RLENGTH); exit}')
+  printf '%s' "${version:-$line}"
+}
+version_equal(){
+  local actual=$1 pinned=$2
+  actual=${actual#[vV]}
+  pinned=${pinned#[vV]}
+  [[ $actual == "$pinned" ]]
+}
+
+collect_status(){
+  local actual head tag font_version font_count
+  [[ $profile != minimal ]] || return 0
+
   check_tool(){
-    local label=$1 cmd=$2 want=$3
-    actual=$(command "$cmd" --version 2>/dev/null | head -n1 || true)
-    if [[ -n $actual && $actual == *"$want"* ]]; then printf '  OK        %-22s %s\n' "$label" "$actual"
-    else printf '  MISMATCH  %-22s installed=%s  pinned=%s\n' "$label" "${actual:-missing}" "$want"; bad=1; fi
+    local id=$1 label=$2 cmd=$3 want=$4
+    actual=''
+    command -v "$cmd" >/dev/null 2>&1 && actual=$(tool_version "$cmd")
+    if [[ -n $actual ]] && version_equal "$actual" "$want"; then
+      add_dep "$id" match Tools "$label" "$actual" "$want"
+    else
+      add_dep "$id" mismatch Tools "$label" "${actual:-missing}" "$want" "installed ${actual:-missing} · pinned $want"
+    fi
   }
   check_plugin_sha(){
-    local label=$1 name=$2 want=$3
+    local id=$1 label=$2 name=$3 want=$4 installed
     head=$(git -C "$HOME/.local/share/terminal-env/zsh-plugins/$name" rev-parse HEAD 2>/dev/null || true)
-    if [[ -n $head && $head == "$want"* ]]; then printf '  OK        %-22s %s\n' "$label" "${head:0:12}"
-    else printf '  MISMATCH  %-22s installed=%s  pinned=%s\n' "$label" "${head:-missing}" "$want"; bad=1; fi
+    if [[ -n $head && $head == "$want"* ]]; then
+      add_dep "$id" match Plugins "$label" "${head:0:12}" "${want:0:12}"
+    else
+      if [[ -n $head ]]; then installed=${head:0:12}; else installed=missing; fi
+      add_dep "$id" mismatch Plugins "$label" "$installed" "${want:0:12}" "installed $installed · pinned ${want:0:12}"
+    fi
   }
   check_plugin_tag(){
-    local label=$1 name=$2 want=$3
+    local id=$1 label=$2 name=$3 want=$4
     tag=$(git -C "$HOME/.local/share/terminal-env/zsh-plugins/$name" describe --tags --exact-match 2>/dev/null || true)
-    if [[ $tag == "$want" ]]; then printf '  OK        %-22s %s\n' "$label" "$tag"
-    else printf '  MISMATCH  %-22s installed=%s  pinned=%s\n' "$label" "${tag:-missing}" "$want"; bad=1; fi
+    if [[ $tag == "$want" ]]; then
+      add_dep "$id" match Plugins "$label" "$tag" "$want"
+    else
+      add_dep "$id" mismatch Plugins "$label" "${tag:-missing}" "$want" "installed ${tag:-missing} · pinned $want"
+    fi
   }
 
-  check_tool 'Oh My Posh' oh-my-posh "$OH_MY_POSH_VERSION"
-  check_tool 'Atuin' atuin "$ATUIN_VERSION"
-  check_tool 'fzf' fzf "$FZF_VERSION"
-  check_tool 'zoxide' zoxide "$ZOXIDE_VERSION"
-  check_tool 'chezmoi' chezmoi "$CHEZMOI_VERSION"
-  check_plugin_sha 'zsh-autosuggestions' zsh-autosuggestions "$ZSH_AUTOSUGGESTIONS_SHA"
-  check_plugin_sha 'zsh-completions' zsh-completions "$ZSH_COMPLETIONS_SHA"
-  check_plugin_sha 'fzf-tab' fzf-tab "$FZF_TAB_SHA"
-  check_plugin_tag 'syntax-highlighting' zsh-syntax-highlighting "$ZSH_SYNTAX_HIGHLIGHTING_REF"
+  check_tool oh_my_posh 'Oh My Posh' oh-my-posh "$OH_MY_POSH_VERSION"
+  check_tool atuin Atuin atuin "$ATUIN_VERSION"
+  check_tool fzf fzf fzf "$FZF_VERSION"
+  check_tool zoxide zoxide zoxide "$ZOXIDE_VERSION"
+  check_tool chezmoi chezmoi chezmoi "$CHEZMOI_VERSION"
+  check_plugin_sha zsh_autosuggestions zsh-autosuggestions zsh-autosuggestions "$ZSH_AUTOSUGGESTIONS_SHA"
+  check_plugin_sha zsh_completions zsh-completions zsh-completions "$ZSH_COMPLETIONS_SHA"
+  check_plugin_sha fzf_tab fzf-tab fzf-tab "$FZF_TAB_SHA"
+  check_plugin_tag zsh_syntax_highlighting syntax-highlighting zsh-syntax-highlighting "$ZSH_SYNTAX_HIGHLIGHTING_REF"
+
   if [[ $profile == workstation ]]; then
     font_version=$(cat "$STATE/fonts/version" 2>/dev/null || true)
     font_count=$(wc -l < "$STATE/fonts/current" 2>/dev/null || printf 0)
-    if [[ $font_version == "$NERD_FONTS_VERSION" && $font_count -eq 4 ]]; then printf '  OK        %-22s %s (%s faces)\n' 'Monaspice Neon NF' "$font_version" "$font_count"
-    else printf '  MISMATCH  %-22s installed=%s/%s faces  pinned=%s/4 faces\n' 'Monaspice Neon NF' "${font_version:-missing}" "${font_count:-0}" "$NERD_FONTS_VERSION"; bad=1; fi
+    font_count=${font_count//[[:space:]]/}
+    if [[ $font_version == "$NERD_FONTS_VERSION" && ${font_count:-0} -eq 4 ]]; then
+      add_dep nerd_fonts match Font 'Monaspice Neon NF' "$font_version · 4 faces" "$NERD_FONTS_VERSION · 4 faces"
+    else
+      add_dep nerd_fonts mismatch Font 'Monaspice Neon NF' "${font_version:-missing} · ${font_count:-0} faces" "$NERD_FONTS_VERSION · 4 faces" "installed ${font_version:-missing} · ${font_count:-0}/4 faces · pinned $NERD_FONTS_VERSION"
+    fi
   fi
 
-  if [[ -f "$STATE/deps-pending" ]]; then
-    printf '\n  ACTION    Source changed dependency pins. Run: terminal-deps sync\n'
-    bad=1
+  [[ ! -f "$STATE/deps-pending" ]] || state_attention=1
+}
+
+render_status_human(){
+  local i category shown attention tone summary
+  (( quiet )) && return
+  te_ui_title dependencies
+  if [[ $profile == minimal ]]; then
+    te_ui_outcome text 'Minimal profile · optional managed dependencies are intentionally omitted'
+    return
   fi
-  (( bad == 0 ))
+  if (( mismatch_n == 0 && state_attention == 0 && ! verbose )); then
+    te_ui_outcome success "Up to date · $dep_n dependencies"
+    return
+  fi
+  if (( verbose )); then
+    for category in Tools Plugins Font; do
+      shown=0
+      for ((i=0; i<dep_n; i++)); do
+        [[ ${DEP_STATUS[$i]} == match && ${DEP_CATEGORY[$i]} == "$category" ]] || continue
+        if (( shown == 0 )); then te_ui_section "$category"; shown=1; fi
+        te_ui_row "${DEP_LABEL[$i]}" "${DEP_INSTALLED[$i]}"
+      done
+    done
+  fi
+  attention=$((mismatch_n+state_attention))
+  if (( attention > 0 )); then
+    te_ui_section Attention
+    for ((i=0; i<dep_n; i++)); do
+      [[ ${DEP_STATUS[$i]} == mismatch ]] || continue
+      te_ui_attention warn "${DEP_LABEL[$i]}" "${DEP_DETAIL[$i]}"
+    done
+    (( state_attention == 0 )) || te_ui_attention warn Dependencies 'source changed dependency pins; run terminal deps sync'
+  fi
+  tone=warning
+  summary="$dep_n dependencies · $attention need attention"
+  te_ui_outcome "$tone" "$summary"
+}
+
+render_status_plain(){
+  local i
+  (( quiet )) && return
+  printf 'meta\tprofile\t%s\n' "$(te_ui_clean_text "$profile")"
+  for ((i=0; i<dep_n; i++)); do
+    printf 'dependency\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "${DEP_STATUS[$i]}" "${DEP_ID[$i]}" "${DEP_CATEGORY[$i]}" "${DEP_LABEL[$i]}" \
+      "${DEP_INSTALLED[$i]}" "${DEP_PINNED[$i]}" "${DEP_DETAIL[$i]}"
+  done
+  (( state_attention == 0 )) || printf 'state\tpending\tdependency manifest changed\n'
+  printf 'summary\t%d\t%d\t%d\n' "$dep_n" "$mismatch_n" "$state_attention"
+}
+
+render_status_json(){
+  local i comma
+  (( quiet )) && return
+  printf '{"command":"dependencies","action":"status","profile":%s,' "$(te_ui_json_string "$(te_ui_clean_text "$profile")")"
+  printf '"summary":{"dependencies":%d,"mismatch":%d,"pending":%s},"dependencies":[' "$dep_n" "$mismatch_n" "$([[ $state_attention == 1 ]] && printf true || printf false)"
+  comma=''
+  for ((i=0; i<dep_n; i++)); do
+    printf '%s{' "$comma"
+    printf '"id":%s,' "$(te_ui_json_string "${DEP_ID[$i]}")"
+    printf '"status":%s,' "$(te_ui_json_string "${DEP_STATUS[$i]}")"
+    printf '"category":%s,' "$(te_ui_json_string "${DEP_CATEGORY[$i]}")"
+    printf '"label":%s,' "$(te_ui_json_string "${DEP_LABEL[$i]}")"
+    printf '"installed":%s,' "$(te_ui_json_string "${DEP_INSTALLED[$i]}")"
+    printf '"pinned":%s,' "$(te_ui_json_string "${DEP_PINNED[$i]}")"
+    printf '"detail":%s}' "$(te_ui_json_string "${DEP_DETAIL[$i]}")"
+    comma=','
+  done
+  printf ']}\n'
+}
+
+render_sync_result(){
+  local status_text
+  (( quiet )) && return
+  if (( dry )); then status_text='dry-run'; else status_text='ok'; fi
+  case "$format" in
+    human)
+      te_ui_title dependencies
+      if (( dry )); then te_ui_outcome accent 'Dry run complete · no dependency changes applied'
+      else te_ui_outcome success 'Dependencies synchronized to the installed source'
+      fi
+      [[ -f "$STATE/deja-retired" && -d "$HOME/.local/share/deja" ]] && te_ui_meta 'Legacy Deja data was preserved for rollback/recovery.'
+      ;;
+    plain) printf 'sync\t%s\t%s\t%d\n' "$status_text" "$(te_ui_clean_text "$profile")" "$dry" ;;
+    json)
+      printf '{"command":"dependencies","action":"sync","profile":%s,"dry_run":%s,"status":%s}\n' \
+        "$(te_ui_json_string "$(te_ui_clean_text "$profile")")" \
+        "$([[ $dry == 1 ]] && printf true || printf false)" \
+        "$(te_ui_json_string "$status_text")"
+      ;;
+  esac
+}
+
+run_child(){
+  if (( quiet )); then "$@" >/dev/null
+  else "$@" 1>&2
+  fi
 }
 
 sync_deps(){
   if (( dry )); then
-    PROFILE="$profile" DRY_RUN=1 bash "$SOURCE/scripts/install-tools-unix.sh"
-    [[ $profile == minimal ]] || PROFILE="$profile" DRY_RUN=1 SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
+    run_child env PROFILE="$profile" DRY_RUN=1 bash "$SOURCE/scripts/install-tools-unix.sh"
+    [[ $profile == minimal ]] || run_child env PROFILE="$profile" DRY_RUN=1 SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
+    render_sync_result
     return 0
   fi
 
-  PROFILE="$profile" bash "$SOURCE/scripts/install-tools-unix.sh"
-  [[ $profile == minimal ]] || PROFILE="$profile" SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
+  run_child env PROFILE="$profile" bash "$SOURCE/scripts/install-tools-unix.sh"
+  [[ $profile == minimal ]] || run_child env PROFILE="$profile" SYNC_PLUGINS=1 bash "$SOURCE/scripts/build-zsh-plugins.sh"
 
   # Early development builds managed Deja. Only retire it when the old installer marker
   # proves Terminal Environment activated/imported it. Preserve its DB so a
@@ -95,14 +277,19 @@ sync_deps(){
     : > "$STATE/deja-retired"
   fi
   rm -f "$STATE/deps-pending"
-  if command -v terminal-doctor >/dev/null 2>&1; then
-    terminal-doctor --quick || true
-  fi
-  echo 'Dependencies synced to the versions pinned by the installed source.'
-  [[ -f "$STATE/deja-retired" && -d "$HOME/.local/share/deja" ]] && echo 'Legacy Deja data was preserved for rollback/recovery.'
+  if command -v terminal-doctor >/dev/null 2>&1; then terminal-doctor --quick --quiet || true; fi
+  render_sync_result
 }
 
 case "$action" in
-  status) status_deps ;;
+  status)
+    collect_status
+    case "$format" in
+      human) render_status_human ;;
+      plain) render_status_plain ;;
+      json) render_status_json ;;
+    esac
+    if (( mismatch_n > 0 || state_attention > 0 )); then exit 1; fi
+    ;;
   sync) sync_deps ;;
 esac

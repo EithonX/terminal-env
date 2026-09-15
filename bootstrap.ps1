@@ -5,10 +5,19 @@ param(
     [switch]$DryRun,
     [switch]$NoFont,
     [switch]$NoTerminalConfig,
-    [switch]$Force
+    [switch]$Force,
+    [ValidateSet('human','plain','json')][string]$Format = 'human',
+    [ValidateSet('auto','always','never')][string]$Color = 'auto',
+    [switch]$Quiet
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if($Quiet -and $PSBoundParameters.ContainsKey('Verbose')){throw '-Quiet and -Verbose cannot be used together.'}
+$script:BootstrapVerbose=$PSBoundParameters.ContainsKey('Verbose')
+function Write-BootstrapProgress([string]$Text){
+    if($Quiet){return}
+    if($Format -eq 'human' -or $script:BootstrapVerbose){[Console]::Error.WriteLine($Text)}
+}
 if(-not $PSBoundParameters.ContainsKey('Profile') -and $env:TERMINAL_ENV_PROFILE){$Profile=$env:TERMINAL_ENV_PROFILE}
 if(-not $PSBoundParameters.ContainsKey('Branch') -and $env:TERMINAL_ENV_BRANCH){$Branch=$env:TERMINAL_ENV_BRANCH}
 if($Profile -notin @('auto','workstation','minimal')){throw "Invalid profile: $Profile"}
@@ -61,16 +70,20 @@ function Resolve-Git {
     )) { if (Test-Path -LiteralPath $candidate -PathType Leaf) { try { & $candidate --version *> $null; if($LASTEXITCODE -eq 0){ return $candidate } } catch {} } }
     return $null
 }
-Write-Host 'Terminal Environment' -ForegroundColor White
-Write-Host "  source  $sourceName@$Branch" -ForegroundColor DarkGray
-Write-Host "  profile $Profile" -ForegroundColor DarkGray
+if(-not $Quiet -and $Format -eq 'human'){
+    Write-Output 'Terminal Environment'
+    Write-Output "  source  $sourceName@$Branch"
+    Write-Output "  profile $Profile"
+}
 $git = Resolve-Git
 if (-not $git) {
     if ($DryRun) { throw 'Git is not installed. Bootstrap dry-run does not install prerequisites.' }
     $winget = Resolve-WinGet
-    Write-Host '  Installing Git prerequisite...' -ForegroundColor Cyan
-    & $winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if ($LASTEXITCODE -ne 0) { throw 'Git installation failed.' }
+    Write-BootstrapProgress 'Preparing Git prerequisite...'
+    $gitInstallOutput=@(& $winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1)
+    $gitInstallExit=$LASTEXITCODE
+    if($script:BootstrapVerbose -and -not $Quiet){foreach($line in $gitInstallOutput){[Console]::Error.WriteLine([string]$line)}}
+    if ($gitInstallExit -ne 0) { throw 'Git installation failed.' }
     $git = Resolve-Git
     if (-not $git) { throw 'Git was installed but git.exe could not be resolved in the current session.' }
 }
@@ -78,7 +91,7 @@ $temp = Join-Path ([IO.Path]::GetTempPath()) ('terminal-env-bootstrap-' + [guid]
 $checkout = Join-Path $temp 'repo'
 New-Item -ItemType Directory -Path $temp | Out-Null
 try {
-    Write-Host '  Fetching source...' -ForegroundColor Cyan
+    Write-BootstrapProgress 'Fetching source...'
     $cloned=$false
     foreach($attempt in 1..3){
         Remove-Item -LiteralPath $checkout -Recurse -Force -ErrorAction SilentlyContinue
@@ -93,11 +106,13 @@ try {
     if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Cloned repository does not contain install.ps1.' }
     $hostExe = if (Test-Path -LiteralPath (Join-Path $PSHOME 'pwsh.exe')) { Join-Path $PSHOME 'pwsh.exe' } else { Join-Path $PSHOME 'powershell.exe' }
     if (-not (Test-Path -LiteralPath $hostExe -PathType Leaf)) { throw 'Current PowerShell executable could not be resolved.' }
-    $installerArgs = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$installer,'-Profile',$Profile)
+    $installerArgs = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$installer,'-Profile',$Profile,'-Format',$Format,'-Color',$Color)
     if ($DryRun) { $installerArgs += '-DryRun' }
     if ($NoFont) { $installerArgs += '-NoFont' }
     if ($NoTerminalConfig) { $installerArgs += '-NoTerminalConfig' }
     if ($Force) { $installerArgs += '-Force' }
+    if ($Quiet) { $installerArgs += '-Quiet' }
+    if ($script:BootstrapVerbose) { $installerArgs += '-Verbose' }
     & $hostExe @installerArgs
     if ($LASTEXITCODE -ne 0) { throw "Installer exited with code $LASTEXITCODE." }
 } finally {
