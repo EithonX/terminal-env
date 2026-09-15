@@ -93,50 +93,66 @@ try {
     $ctx = Resolve-TerminalEnvContext -Cwd $nested
     if (-not $ctx.toolchains['node'].conflict -or $null -ne $ctx.toolchains['node'].selector -or $ctx.toolchains['node'].prompt -ne 'node !') { throw 'Conflicting Node selectors were silently resolved' }
 
-    Remove-Item -LiteralPath (Join-Path $nested '.node-version')
+    $mismatch = Join-Path $mono 'services\mismatch'
+    New-Item -ItemType Directory -Force -Path $mismatch | Out-Null
+    Set-Content -LiteralPath (Join-Path $mismatch '.nvmrc') -Value '20'
     $env:FAKE_NODE_VERSION = '24.7.0'
-    $ctx = Resolve-TerminalEnvContext -Cwd $nested
+    $ctx = Resolve-TerminalEnvContext -Cwd $mismatch
     if (-not $ctx.toolchains['node'].mismatch -or $ctx.toolchains['node'].prompt -ne 'node 24 ≠ 20') { throw 'Node active/selected mismatch is not reported' }
 
-    Set-Content -LiteralPath (Join-Path $nested '.nvmrc') -Value 'lts/*'
-    $ctx = Resolve-TerminalEnvContext -Cwd $nested
+    $symbolic = Join-Path $mono 'services\symbolic'
+    New-Item -ItemType Directory -Force -Path $symbolic | Out-Null
+    Set-Content -LiteralPath (Join-Path $symbolic '.nvmrc') -Value 'lts/*'
+    $ctx = Resolve-TerminalEnvContext -Cwd $symbolic
     if ($ctx.toolchains['node'].selector_status -ne 'unknown' -or $ctx.toolchains['node'].mismatch -or $ctx.toolchains['node'].prompt -ne 'node lts/*') { throw 'Non-numeric selector compatibility was guessed' }
-    Set-Content -LiteralPath (Join-Path $nested '.nvmrc') -Value '20'
 
-    $package = Join-Path $temp 'package'
-    New-ContextFixtureRepo $package
-    Set-Content -LiteralPath (Join-Path $package 'package.json') -Value '{"engines":{"node":">=22"}}'
-    $ctx = Resolve-TerminalEnvContext -Cwd $package
+    $packageRoot = Join-Path $temp 'package'
+    New-ContextFixtureRepo $packageRoot
+    $packageSatisfied = Join-Path $packageRoot 'satisfied'
+    New-Item -ItemType Directory -Force -Path $packageSatisfied | Out-Null
+    Set-Content -LiteralPath (Join-Path $packageSatisfied 'package.json') -Value '{"engines":{"node":">=22"}}'
+    $ctx = Resolve-TerminalEnvContext -Cwd $packageSatisfied
     if ($ctx.toolchains['node'].constraint.kind -ne 'package-engines' -or $ctx.toolchains['node'].constraint_status -ne 'satisfied' -or $ctx.toolchains['node'].prompt -ne 'node ≥22') { throw 'package.json engines.node is not treated as a constraint' }
 
-    Set-Content -LiteralPath (Join-Path $package 'package.json') -Value '{"engines":{"node":">=22 <24"}}'
-    $ctx = Resolve-TerminalEnvContext -Cwd $package
+    $packageRange = Join-Path $packageRoot 'range'
+    New-Item -ItemType Directory -Force -Path $packageRange | Out-Null
+    Set-Content -LiteralPath (Join-Path $packageRange 'package.json') -Value '{"engines":{"node":">=22 <24"}}'
+    $ctx = Resolve-TerminalEnvContext -Cwd $packageRange
     if ($ctx.toolchains['node'].constraint_status -ne 'unknown' -or $ctx.toolchains['node'].mismatch -or $ctx.toolchains['node'].prompt -ne 'node ≥22 <24') { throw 'Unsupported constraint syntax must remain explicit rather than guessed' }
 
-    Set-Content -LiteralPath (Join-Path $package 'package.json') -Value '{"engines":{"node":"22"}}'
-    $ctx = Resolve-TerminalEnvContext -Cwd $package
+    $packageFamily = Join-Path $packageRoot 'family'
+    New-Item -ItemType Directory -Force -Path $packageFamily | Out-Null
+    Set-Content -LiteralPath (Join-Path $packageFamily 'package.json') -Value '{"engines":{"node":"22"}}'
+    $ctx = Resolve-TerminalEnvContext -Cwd $packageFamily
     if ($ctx.toolchains['node'].constraint_status -ne 'mismatch' -or $ctx.toolchains['node'].prompt -ne 'node 24 < 22.x') { throw 'Node partial-version constraint is not evaluated as a version family' }
 
-    Set-Content -LiteralPath (Join-Path $package 'package.json') -Value '{"devEngines":{"runtime":"invalid"},"engines":{"node":">=22"}}'
-    $ctx = Resolve-TerminalEnvContext -Cwd $package
+    $packageMalformed = Join-Path $packageRoot 'malformed'
+    New-Item -ItemType Directory -Force -Path $packageMalformed | Out-Null
+    Set-Content -LiteralPath (Join-Path $packageMalformed 'package.json') -Value '{"devEngines":{"runtime":"invalid"},"engines":{"node":">=22"}}'
+    $ctx = Resolve-TerminalEnvContext -Cwd $packageMalformed
     if ($null -ne $ctx.toolchains['node'].selector -or $ctx.toolchains['node'].constraint.kind -ne 'package-engines') { throw 'Malformed devEngines hid valid engines metadata' }
 
-    Set-Content -LiteralPath (Join-Path $package 'package.json') -Value '{"devEngines":{"runtime":{"name":"node","version":"22"}}}'
-    $ctx = Resolve-TerminalEnvContext -Cwd $package
+    $packageSelector = Join-Path $packageRoot 'selector'
+    New-Item -ItemType Directory -Force -Path $packageSelector | Out-Null
+    Set-Content -LiteralPath (Join-Path $packageSelector 'package.json') -Value '{"devEngines":{"runtime":{"name":"node","version":"22"}}}'
+    $ctx = Resolve-TerminalEnvContext -Cwd $packageSelector
     if ($ctx.toolchains['node'].selector.kind -ne 'package-devEngines' -or -not $ctx.toolchains['node'].selector.source) { throw 'package.json devEngines.runtime is not treated as a selector' }
 
-    $unsafe = Join-Path $temp 'unsafe-metadata'
-    New-ContextFixtureRepo $unsafe
-    [IO.File]::WriteAllText((Join-Path $unsafe '.nvmrc'), "22$([char]27)]0;unsafe$([char]7)`n")
+    $unsafeSelector = Join-Path $temp 'unsafe-selector'
+    New-ContextFixtureRepo $unsafeSelector
+    [IO.File]::WriteAllText((Join-Path $unsafeSelector '.nvmrc'), "22$([char]27)]0;unsafe$([char]7)`n")
     Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
-    $ctx = Resolve-TerminalEnvContext -Cwd $unsafe
+    $ctx = Resolve-TerminalEnvContext -Cwd $unsafeSelector
     if ($ctx.toolchains.Contains('node')) { throw 'Control characters in selectors were accepted' }
     if (Test-Path -LiteralPath $log) { throw 'Rejected selector executed a runtime' }
-    Set-Content -LiteralPath (Join-Path $unsafe '.nvmrc') -Value '22'
+
+    $unsafeConstraintRoot = Join-Path $temp 'unsafe-constraint'
+    New-ContextFixtureRepo $unsafeConstraintRoot
+    Set-Content -LiteralPath (Join-Path $unsafeConstraintRoot '.nvmrc') -Value '22'
     $unsafeConstraint = "{`"engines`":{`"node`":`">=22\u001b[31m`"}}"
-    Set-Content -LiteralPath (Join-Path $unsafe 'package.json') -Value $unsafeConstraint
+    Set-Content -LiteralPath (Join-Path $unsafeConstraintRoot 'package.json') -Value $unsafeConstraint
     $env:FAKE_NODE_VERSION = '22.14.0'
-    $ctx = Resolve-TerminalEnvContext -Cwd $unsafe
+    $ctx = Resolve-TerminalEnvContext -Cwd $unsafeConstraintRoot
     if ($null -ne $ctx.toolchains['node'].constraint -or $ctx.prompt.text.Contains([char]27)) { throw 'Control characters in constraints were accepted' }
 
     $python = Join-Path $temp 'python'

@@ -48,8 +48,11 @@ restore_backup_tree(){
 
 api_asset(){
   local repo=$1 tag=$2 asset=$3 json url digest token=${GITHUB_TOKEN:-${GH_TOKEN:-}}
-  local auth=(); [[ -n $token ]] && auth=(-H "Authorization: Bearer $token")
-  json=$(retry curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -H 'User-Agent: terminal-env-installer' "${auth[@]}" "https://api.github.com/repos/$repo/releases/tags/$tag") || return 1
+  if [[ -n $token ]]; then
+    json=$(retry curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -H 'User-Agent: terminal-env-installer' -H "Authorization: Bearer $token" "https://api.github.com/repos/$repo/releases/tags/$tag") || return 1
+  else
+    json=$(retry curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -H 'User-Agent: terminal-env-installer' "https://api.github.com/repos/$repo/releases/tags/$tag") || return 1
+  fi
   url=$(jq -r --arg a "$asset" '.assets[] | select(.name==$a) | .browser_download_url' <<<"$json" | head -n1)
   digest=$(jq -r --arg a "$asset" '.assets[] | select(.name==$a) | (.digest // "")' <<<"$json" | head -n1)
   [[ -n "$url" && "$url" != null ]] || return 1

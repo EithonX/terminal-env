@@ -88,4 +88,8 @@ done
 checked_out=$(git -C "$tmp/repo" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 [[ $checked_out == "$branch" ]] || { printf "'%s' is not an updateable branch.\n" "$branch" >&2; exit 1; }
 [[ -f $tmp/repo/install.sh ]] || { printf 'Cloned repository does not contain install.sh.\n' >&2; exit 1; }
-bash "$tmp/repo/install.sh" "${args[@]}"
+if ((${#args[@]})); then
+  bash "$tmp/repo/install.sh" "${args[@]}"
+else
+  bash "$tmp/repo/install.sh"
+fi

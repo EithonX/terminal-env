@@ -119,13 +119,39 @@ version_core(){
   printf '%s' "$v"
 }
 array_count(){
-  local ref="$1[@]"
-  set -- "${!ref}"
-  printf '%s' "$#"
+  case "$1" in
+    NODE_SEL_VALUES) printf '%s' "${#NODE_SEL_VALUES[@]}" ;;
+    NODE_SEL_KINDS) printf '%s' "${#NODE_SEL_KINDS[@]}" ;;
+    NODE_SEL_SOURCES) printf '%s' "${#NODE_SEL_SOURCES[@]}" ;;
+    PY_SEL_VALUES) printf '%s' "${#PY_SEL_VALUES[@]}" ;;
+    PY_SEL_KINDS) printf '%s' "${#PY_SEL_KINDS[@]}" ;;
+    PY_SEL_SOURCES) printf '%s' "${#PY_SEL_SOURCES[@]}" ;;
+    GO_SEL_VALUES) printf '%s' "${#GO_SEL_VALUES[@]}" ;;
+    GO_SEL_KINDS) printf '%s' "${#GO_SEL_KINDS[@]}" ;;
+    GO_SEL_SOURCES) printf '%s' "${#GO_SEL_SOURCES[@]}" ;;
+    RUST_SEL_VALUES) printf '%s' "${#RUST_SEL_VALUES[@]}" ;;
+    RUST_SEL_KINDS) printf '%s' "${#RUST_SEL_KINDS[@]}" ;;
+    RUST_SEL_SOURCES) printf '%s' "${#RUST_SEL_SOURCES[@]}" ;;
+    *) return 2 ;;
+  esac
 }
 array_get(){
-  local ref="$1[$2]"
-  printf '%s' "${!ref}"
+  local index=$2
+  case "$1" in
+    NODE_SEL_VALUES) printf '%s' "${NODE_SEL_VALUES[$index]-}" ;;
+    NODE_SEL_KINDS) printf '%s' "${NODE_SEL_KINDS[$index]-}" ;;
+    NODE_SEL_SOURCES) printf '%s' "${NODE_SEL_SOURCES[$index]-}" ;;
+    PY_SEL_VALUES) printf '%s' "${PY_SEL_VALUES[$index]-}" ;;
+    PY_SEL_KINDS) printf '%s' "${PY_SEL_KINDS[$index]-}" ;;
+    PY_SEL_SOURCES) printf '%s' "${PY_SEL_SOURCES[$index]-}" ;;
+    GO_SEL_VALUES) printf '%s' "${GO_SEL_VALUES[$index]-}" ;;
+    GO_SEL_KINDS) printf '%s' "${GO_SEL_KINDS[$index]-}" ;;
+    GO_SEL_SOURCES) printf '%s' "${GO_SEL_SOURCES[$index]-}" ;;
+    RUST_SEL_VALUES) printf '%s' "${RUST_SEL_VALUES[$index]-}" ;;
+    RUST_SEL_KINDS) printf '%s' "${RUST_SEL_KINDS[$index]-}" ;;
+    RUST_SEL_SOURCES) printf '%s' "${RUST_SEL_SOURCES[$index]-}" ;;
+    *) return 2 ;;
+  esac
 }
 version_ge(){
   local a b i av bv a1 a2 a3 a4 b1 b2 b3 b4
@@ -625,7 +651,7 @@ resolve_tool python PY_SEL_VALUES PY_SEL_KINDS PY_SEL_SOURCES "$PY_CONSTRAINT" "
 resolve_tool go GO_SEL_VALUES GO_SEL_KINDS GO_SEL_SOURCES "$GO_CONSTRAINT" "$GO_CONSTRAINT_KIND" "$GO_CONSTRAINT_SOURCE"
 resolve_tool rust RUST_SEL_VALUES RUST_SEL_KINDS RUST_SEL_SOURCES "$RUST_CONSTRAINT" "$RUST_CONSTRAINT_KIND" "$RUST_CONSTRAINT_SOURCE"
 
-PROMPT_PARTS=(); PROMPT_STATE=normal
+PROMPT_PARTS=(''); PROMPT_STATE=normal
 for tool in NODE PY GO RUST; do
   ref="${tool}_RELEVANT"; relevant=${!ref}; (( relevant )) || continue
   ref="${tool}_PROMPT"; part=${!ref}; [[ -n $part ]] && PROMPT_PARTS+=("$part")

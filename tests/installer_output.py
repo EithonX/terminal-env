@@ -62,7 +62,7 @@ fi
 DOCTOR
 chmod +x "$HOME/.local/bin/terminal-doctor"
 if [[ ${TERMINAL_ENV_TEST_FONT_MUTATE:-0} == 1 ]]; then
-  fontdir="$HOME/.local/share/fonts"
+  if [[ $(uname -s) == Darwin ]]; then fontdir="$HOME/Library/Fonts"; else fontdir="$HOME/.local/share/fonts"; fi
   mkdir -p "$fontdir" "$HOME/.local/state/terminal-env/fonts"
   rm -f -- "$fontdir"/MonaspiceNeNerdFont-*.terminal-env-*.otf
   printf 'new\n' > "$fontdir/MonaspiceNeNerdFont-Regular.terminal-env-new.otf"
@@ -167,7 +167,8 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-install-output-') as td:
     assert complete == []
 
     font_home = base / 'font-failure-home'
-    old_font = font_home / '.local/share/fonts/MonaspiceNeNerdFont-Regular.terminal-env-old.otf'
+    font_dir = font_home / ('Library/Fonts' if platform.system() == 'Darwin' else '.local/share/fonts')
+    old_font = font_dir / 'MonaspiceNeNerdFont-Regular.terminal-env-old.otf'
     old_font.parent.mkdir(parents=True)
     old_font.write_text('old\n')
     old_font_state = font_home / '.local/state/terminal-env/fonts/version'
@@ -181,7 +182,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-install-output-') as td:
     )
     assert font_failed.returncode != 0
     assert old_font.read_text() == 'old\n'
-    assert not (font_home / '.local/share/fonts/MonaspiceNeNerdFont-Regular.terminal-env-new.otf').exists()
+    assert not (font_dir / 'MonaspiceNeNerdFont-Regular.terminal-env-new.otf').exists()
     assert old_font_state.read_text() == 'old\n'
 
     shell_home = base / 'shell-failure-home'
