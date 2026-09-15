@@ -255,3 +255,4 @@ try{
 }
 
 Write-Host 'smoke: PASS' -ForegroundColor Green
+exit 0

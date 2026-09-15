@@ -106,6 +106,10 @@ def clean_log(log: Path) -> None:
     log.unlink(missing_ok=True)
 
 
+def physical(path: Path) -> str:
+    return str(path.resolve())
+
+
 with tempfile.TemporaryDirectory(prefix='terminal-env-context-') as td:
     base = Path(td)
     env, log = fake_environment(base)
@@ -136,13 +140,13 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-context-') as td:
     ctx = load_context(nested, env)
     node = ctx['toolchains']['node']
     assert node['selector']['value'] == '20'
-    assert node['selectors'][0]['source'] == str(nested / '.nvmrc')
+    assert node['selectors'][0]['source'] == physical(nested / '.nvmrc')
     assert node['prompt'] == 'node 20'
     node_log = log.read_text()
     assert 'offline=true' in node_log and 'auto=false' in node_log and 'notfound=false' in node_log, 'runtime probing must disable mise network/auto-install behavior'
     plain = load_plain(nested, env)
-    assert f'context\troot\t{mono}' in plain
-    assert f'toolchain\tnode\tselector\t20\tnvmrc\t{nested / ".nvmrc"}' in plain
+    assert f'context\troot\t{physical(mono)}' in plain
+    assert f'toolchain\tnode\tselector\t20\tnvmrc\t{physical(nested / ".nvmrc")}' in plain
     assert 'toolchain\tnode\tactive\t20.11.1\tpath\t' in plain
     assert 'toolchain\tnode\tconflict\tfalse\t\t' in plain
     assert 'prompt\ttext\tnode 20' in plain
@@ -218,7 +222,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-context-') as td:
     ctx = load_context(pkg, env)
     node = ctx['toolchains']['node']
     assert node['selector']['kind'] == 'package-devEngines'
-    assert node['selector']['source'] == str(pkg / 'package.json')
+    assert node['selector']['source'] == physical(pkg / 'package.json')
     assert node['mismatch'] is True
 
     missing_pkg = base / 'package-missing-node'
@@ -322,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-context-') as td:
     env['FAKE_GO_VERSION'] = '1.24.3'
     ctx = load_context(workspace, env)
     go = ctx['toolchains']['go']
-    assert go['constraint']['source'] == str(gorepo / 'go.work')
+    assert go['constraint']['source'] == physical(gorepo / 'go.work')
     assert go['constraint']['value'] == '1.24'
     assert go['selector']['value'] == 'go1.24.2'
 
@@ -376,7 +380,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-env-context-') as td:
     node = ctx['toolchains']['node']
     assert node['conflict'] is False
     assert node['selector']['value'] == '20'
-    assert node['selector']['source'] == str(mise_nested / '.mise.toml')
+    assert node['selector']['source'] == physical(mise_nested / '.mise.toml')
 
     (mise_nested / 'mise.toml').write_text('[tools]\nnode = "22"\n')
     ctx = load_context(mise_nested, env)
