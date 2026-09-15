@@ -294,7 +294,7 @@ function Get-TerminalEnvCommandInfo {
     return $null
 }
 
-function Invoke-TerminalEnvVersionCommand {
+function Invoke-TerminalEnvRuntimeVersionCommand {
     param([object]$CommandInfo, [string]$Tool)
     if ($null -eq $CommandInfo) { return '' }
     $miseNames = @('MISE_OFFLINE','MISE_AUTO_INSTALL','MISE_NOT_FOUND_AUTO_INSTALL','MISE_EXEC_AUTO_INSTALL','MISE_NO_HOOKS')
@@ -570,7 +570,7 @@ function Resolve-TerminalEnvContext {
     }
     if ($pythonSelectors.Count -gt 0 -or $null -ne $pythonConstraint -or $venvInside) {
         $pythonInfo = Get-TerminalEnvCommandInfo -Names @('python','python3')
-        $pythonVersion = Invoke-TerminalEnvVersionCommand -CommandInfo $pythonInfo -Tool python
+        $pythonVersion = Invoke-TerminalEnvRuntimeVersionCommand -CommandInfo $pythonInfo -Tool python
         if ($venvInside -and $null -ne $pythonInfo -and $pythonVersion -and (Test-TerminalEnvPathInside -Path $pythonInfo.path -Root $venvPath)) {
             Add-TerminalEnvSelector -List $pythonSelectors -Value $pythonVersion -Kind 'virtualenv' -Source $venvPath
         }
@@ -619,11 +619,11 @@ function Resolve-TerminalEnvContext {
     if ($null -ne $foundToml -and (Test-TerminalEnvMetadataValueSafe $foundToml.value)) { $rustConstraint = [pscustomobject]@{ value = $foundToml.value; kind = 'cargo-rust-version'; source = $foundToml.source } }
 
     $nodeInfo = if ($nodeSelectors.Count -gt 0 -or $null -ne $nodeConstraint) { Get-TerminalEnvCommandInfo -Names @('node') } else { $null }
-    $nodeVersion = if ($null -ne $nodeInfo) { Invoke-TerminalEnvVersionCommand -CommandInfo $nodeInfo -Tool node } else { '' }
+    $nodeVersion = if ($null -ne $nodeInfo) { Invoke-TerminalEnvRuntimeVersionCommand -CommandInfo $nodeInfo -Tool node } else { '' }
     $goInfo = if ($goSelectors.Count -gt 0 -or $null -ne $goConstraint) { Get-TerminalEnvCommandInfo -Names @('go') } else { $null }
-    $goVersion = if ($null -ne $goInfo) { Invoke-TerminalEnvVersionCommand -CommandInfo $goInfo -Tool go } else { '' }
+    $goVersion = if ($null -ne $goInfo) { Invoke-TerminalEnvRuntimeVersionCommand -CommandInfo $goInfo -Tool go } else { '' }
     $rustInfo = if ($rustSelectors.Count -gt 0 -or $null -ne $rustConstraint) { Get-TerminalEnvCommandInfo -Names @('rustc') } else { $null }
-    $rustVersion = if ($null -ne $rustInfo) { Invoke-TerminalEnvVersionCommand -CommandInfo $rustInfo -Tool rust } else { '' }
+    $rustVersion = if ($null -ne $rustInfo) { Invoke-TerminalEnvRuntimeVersionCommand -CommandInfo $rustInfo -Tool rust } else { '' }
 
     $tools = [ordered]@{}
     $node = Resolve-TerminalEnvTool -Tool node -Selectors @($nodeSelectors) -Constraint $nodeConstraint -ActiveInfo $nodeInfo -ActiveVersion $nodeVersion -Note ''

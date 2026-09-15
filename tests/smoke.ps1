@@ -121,6 +121,11 @@ function Assert-TerminalEnvOutputLines {
 }
 
 $terminalPath=Join-Path $root 'dot_config\terminal-env\powershell\terminal.ps1'
+$contextScriptPath=Join-Path $root 'dot_config\terminal-env\powershell\context.ps1'
+$terminalFunctionNames=@($asts[$terminalPath].FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true) | ForEach-Object Name)
+$contextFunctionNames=@($asts[$contextScriptPath].FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true) | ForEach-Object Name)
+$commandFunctionCollisions=@($terminalFunctionNames | Where-Object { $contextFunctionNames -contains $_ })
+if($commandFunctionCollisions.Count){throw "PowerShell command modules collide in the profile scope: $($commandFunctionCollisions -join ', ')"}
 $terminalHelp=@(& $terminalPath '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalHelp -RequiredLines @('Usage','terminal <command> [options]') -Message 'Unified terminal root help is invalid'
 $terminalVersionJson=@(& $terminalPath 'version' '--format' 'json' '--color' 'never') -join "`n"
@@ -132,7 +137,6 @@ $terminalDepsCheckHelp=@(& $terminalPath 'deps' 'check' '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalDepsCheckHelp -RequiredLines @('Usage: terminal deps [status|sync] [options]','terminal-deps [status|sync] [options]') -Message 'Unified terminal deps check alias failed'
 $terminalContextHelp=@(& $terminalPath 'context' '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $terminalContextHelp -RequiredLines @('Usage: terminal context [options]','terminal-context [options]') -Message 'Unified terminal context help is inconsistent'
-$contextScriptPath=Join-Path $root 'dot_config\terminal-env\powershell\context.ps1'
 $standaloneContextHelp=@(& $contextScriptPath '--help')
 Assert-TerminalEnvOutputLines -CapturedOutput $standaloneContextHelp -RequiredLines @('Usage: terminal context [options]','terminal-context [options]') -Message 'PowerShell terminal-context help emitted no usable output'
 $standaloneContextJson=@(& $contextScriptPath '--cwd' $root '--format' 'json') -join "`n"
@@ -143,6 +147,12 @@ $unifiedContextJson=@(& $terminalPath 'context' '--cwd' $root '--format' 'json')
 if([string]::IsNullOrWhiteSpace($unifiedContextJson)){throw 'Unified terminal context JSON output is empty'}
 $unifiedContextPayload=$unifiedContextJson|ConvertFrom-Json
 if($unifiedContextPayload.schema_version -ne 1 -or [string]::IsNullOrWhiteSpace([string]$unifiedContextPayload.cwd)){throw 'Unified terminal context JSON contract is invalid'}
+. $terminalPath
+. $contextScriptPath
+$profileOrderVersionJson=@(Invoke-TerminalEnvCommand -CommandArgs @('version','--format','json','--color','never')) -join "`n"
+if([string]::IsNullOrWhiteSpace($profileOrderVersionJson)){throw 'Unified terminal version output was lost after loading context module'}
+$profileOrderVersionPayload=$profileOrderVersionJson|ConvertFrom-Json
+if($profileOrderVersionPayload.command -ne 'version' -or [string]::IsNullOrWhiteSpace([string]$profileOrderVersionPayload.profile)){throw 'Unified terminal version contract is invalid after profile-order module loading'}
 $pwshExecutable=(Get-Command pwsh -ErrorAction Stop).Source
 $directContextJson=@(& $pwshExecutable -NoLogo -NoProfile -File $terminalPath 'context' '--cwd' $root '--format' 'json') -join "`n"
 if($LASTEXITCODE -ne 0){throw "Unified terminal direct-process success returned exit code $LASTEXITCODE"}
